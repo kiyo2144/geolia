@@ -1,0 +1,30 @@
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 64px 24px;
+  font-family: var(--font-geist-sans);
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.description {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+  max-width: 640px;
+}
+
+.note {
+  font-size: 13px;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 12px 16px;
+  width: fit-content;
+}

@@ -1,69 +1,46 @@
-import Image from "next/image";
+import Link from "next/link";
 import styles from "./page.module.css";
 
 export default function Home() {
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{" "}
-            <code className={styles.code}>page.js</code> file.
-          </h1>
+    <main className={styles.main}>
+      <section className={styles.hero}>
+        <h1 className={styles.title}>geolia</h1>
+        <p className={styles.lead}>
+          スマートフォンのカメラを使って、点群・Gaussian
+          Splat・画像・VRoidStudioデータなどの3Dコンテンツを、現実の緯度・経度・高度に「設置」して共有できるプラットフォームです。
+          設置した3Dデータは3Dマップ上に可視化され、他のユーザーも同じ場所を訪れてARで閲覧できます。
+        </p>
+        <div className={styles.actions}>
+          <Link href="/map" className={styles.primaryAction}>
+            地図を見る
+          </Link>
+          <Link href="/ar/new" className={styles.secondaryAction}>
+            ARで設置する
+          </Link>
+        </div>
+      </section>
+
+      <section className={styles.features}>
+        <div className={styles.featureCard}>
+          <h2>AR設置</h2>
           <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
+            カメラ・位置情報・端末の向きを使い、3Dデータを現実の場所に配置します。設置した内容はSupabaseに保存され、他のユーザーとも共有されます。
           </p>
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className={styles.featureCard}>
+          <h2>3Dマップ</h2>
+          <p>
+            設置済みのデータを地図上にピンとして一覧表示します。森林簿・地籍などのサンプル地理データや、ユーザーが追加したデータも重ねて表示できます。
+          </p>
         </div>
-      </main>
-    </div>
+        <div className={styles.featureCard}>
+          <h2>データセット</h2>
+          <p>
+            シェープファイルやGeoJSON形式の地理データをアップロードし、マップ上に追加できます。
+          </p>
+        </div>
+      </section>
+    </main>
   );
 }

@@ -1,0 +1,36 @@
+.header {
+  border-bottom: 1px solid var(--border-color);
+  background: var(--background);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  gap: 24px;
+}
+
+.brand {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--foreground);
+  letter-spacing: 0.02em;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.navLink {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.navLink:hover {
+  color: var(--foreground);
+}

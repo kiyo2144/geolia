@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local scratch notes
 o.md
+
+# local dev-server launch config (machine-specific paths)
+.claude/
