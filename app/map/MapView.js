@@ -407,7 +407,9 @@ export default function MapView() {
                 .data.publicUrl
             }" alt="設置プレビュー" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block;" />`
           : "";
-        const html = `${previewHtml}<b>${p.label ?? "AR配置"}</b><br>種別 ${assetTypeLabel}（${p.format}）<br>緯度 ${Number(p.lat).toFixed(6)}　経度 ${Number(p.lng).toFixed(6)}<br>${altitudeText}`;
+        // プライバシー保護のため、緯度・経度は表示しない（ユーザー登録・公開設定の
+        // 導入までの暫定対応。将来的にユーザーが公開/非公開を選択できるようにする）。
+        const html = `${previewHtml}<b>${p.label ?? "AR配置"}</b><br>種別 ${assetTypeLabel}（${p.format}）<br>${altitudeText}`;
         arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).setHTML(html).addTo(map);
       });
 
