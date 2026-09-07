@@ -375,7 +375,13 @@ export default function MapView() {
             : `高度 約${Math.round(p.altitude)}m`;
         const assetTypeLabel =
           p.asset_type === "gaussian_splat" ? "Gaussian Splat" : "点群";
-        const html = `<b>${p.label ?? "AR配置"}</b><br>種別 ${assetTypeLabel}（${p.format}）<br>緯度 ${Number(p.lat).toFixed(6)}　経度 ${Number(p.lng).toFixed(6)}<br>${altitudeText}`;
+        const previewHtml = p.preview_storage_path
+          ? `<img src="${
+              supabaseRef.current.storage.from("ar-assets").getPublicUrl(p.preview_storage_path)
+                .data.publicUrl
+            }" alt="設置プレビュー" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block;" />`
+          : "";
+        const html = `${previewHtml}<b>${p.label ?? "AR配置"}</b><br>種別 ${assetTypeLabel}（${p.format}）<br>緯度 ${Number(p.lat).toFixed(6)}　経度 ${Number(p.lng).toFixed(6)}<br>${altitudeText}`;
         arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).setHTML(html).addTo(map);
       });
 

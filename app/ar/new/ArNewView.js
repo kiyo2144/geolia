@@ -67,9 +67,12 @@ export function ArNewView() {
   // null | 'original'(元データの色) | 'gradient'(色情報が無く高さで自動着色)
   const [colorInfo, setColorInfo] = useState(null);
   const [label, setLabel] = useState("");
+  const [labelError, setLabelError] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
   const [isSaved, setIsSaved] = useState(false);
+  // 設置確定時に撮影した、カメラ映像＋3Dデータの合成プレビュー画像
+  const [previewBlob, setPreviewBlob] = useState(null);
 
   const geolocation = useGeolocation({ watch: true });
   const deviceOrientation = useDeviceOrientation();
@@ -78,6 +81,8 @@ export function ArNewView() {
   // 狙い撃ちモードでカメラ正面に表示している地点のローカル座標(east/north)。
   // Canvas内で毎フレーム更新され、「ここに配置」ボタン押下時に読み取る。
   const aimPointRef = useRef({ east: 0, north: 0 });
+  // プレビュー画像撮影用。ARScene側で生成されたcanvas要素への参照。
+  const arCanvasRef = useRef(null);
 
   const isConfirmReady = placement !== null;
 
@@ -91,6 +96,41 @@ export function ArNewView() {
       if (dataUrl) URL.revokeObjectURL(dataUrl);
     };
   }, [dataUrl]);
+
+  // プレビュー画像（Blob）の表示用URL
+  const previewUrl = useMemo(
+    () => (previewBlob ? URL.createObjectURL(previewBlob) : null),
+    [previewBlob],
+  );
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  // カメラ映像とAR描画(three.jsのcanvas)を合成し、設置時点の見た目を
+  // プレビュー画像として撮影する。カメラを使わず現在地をそのまま設置場所にした
+  // 場合はcanvasが存在しないため、その場合はプレビューを生成しない。
+  const capturePreview = () => {
+    const video = cameraStream.videoRef.current;
+    const arCanvas = arCanvasRef.current;
+    if (!video || !arCanvas || video.readyState < 2) return;
+
+    const rect = video.getBoundingClientRect();
+    const width = Math.round(rect.width) || video.videoWidth || arCanvas.width;
+    const height = Math.round(rect.height) || video.videoHeight || arCanvas.height;
+    if (!width || !height) return;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, width, height);
+    ctx.drawImage(arCanvas, 0, 0, width, height);
+    canvas.toBlob((blob) => {
+      if (blob) setPreviewBlob(blob);
+    }, "image/jpeg", 0.85);
+  };
 
   // AR配置ステップから離れたらカメラを止める
   useEffect(() => {
@@ -150,6 +190,7 @@ export function ArNewView() {
     setAdjustment(DEFAULT_ADJUSTMENT);
     setArSubMode("fine-tune");
     setIsSaved(false);
+    capturePreview();
   };
 
   const handleBackToAiming = () => setArSubMode("aiming");
@@ -210,6 +251,12 @@ export function ArNewView() {
 
   const handleSave = useCallback(async () => {
     if (!dataFile || !placement) return;
+    if (!label.trim()) {
+      setLabelError(true);
+      setSaveStatus("名前を入力してください");
+      return;
+    }
+    setLabelError(false);
 
     setIsSaving(true);
     setSaveStatus("アップロード中...");
@@ -223,6 +270,20 @@ export function ArNewView() {
           contentType: dataFile.type || "application/octet-stream",
         });
       if (uploadError) throw uploadError;
+
+      // プレビュー画像は無くても配置の保存自体は継続する（あくまで補助的な情報のため）
+      let previewStoragePath = null;
+      if (previewBlob) {
+        const previewPath = `${crypto.randomUUID()}-preview.jpg`;
+        const { error: previewUploadError } = await supabase.storage
+          .from("ar-assets")
+          .upload(previewPath, previewBlob, { contentType: "image/jpeg" });
+        if (previewUploadError) {
+          console.error("プレビュー画像のアップロードに失敗しました:", previewUploadError);
+        } else {
+          previewStoragePath = previewPath;
+        }
+      }
 
       setSaveStatus("データを登録中...");
       const { data: assetRow, error: assetError } = await supabase
@@ -241,7 +302,7 @@ export function ArNewView() {
       setSaveStatus("配置情報を保存中...");
       const { error: placementError } = await supabase.from("ar_placements").insert({
         data_asset_id: assetRow.id,
-        label: label.trim() || null,
+        label: label.trim(),
         lat: placement.lat,
         lng: placement.lng,
         altitude: finalAltitude,
@@ -249,6 +310,7 @@ export function ArNewView() {
         rotation_y: adjustment.rotationY,
         scale: adjustment.scale,
         vertical_offset: adjustment.y,
+        preview_storage_path: previewStoragePath,
       });
       if (placementError) throw placementError;
 
@@ -260,7 +322,7 @@ export function ArNewView() {
     } finally {
       setIsSaving(false);
     }
-  }, [dataFile, dataFormat, placement, adjustment, label, finalAltitude, supabase]);
+  }, [dataFile, dataFormat, placement, adjustment, label, finalAltitude, previewBlob, supabase]);
 
   return (
     <div className={styles.wrapper}>
@@ -348,6 +410,9 @@ export function ArNewView() {
                 gestureDirection={gestureDirection}
                 onVertexColorDetected={handleVertexColorDetected}
                 onSplatLoaded={handleSplatLoaded}
+                onCanvasReady={(canvas) => {
+                  arCanvasRef.current = canvas;
+                }}
               />
 
               {arSubMode === "fine-tune" && (
@@ -448,14 +513,27 @@ export function ArNewView() {
               </p>
             )}
 
+            {previewUrl && (
+              <div className={styles.field}>
+                プレビュー画像
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewUrl} alt="設置プレビュー" className={styles.previewImage} />
+              </div>
+            )}
+
             <label className={styles.field}>
-              名前（任意）
+              名前（必須）
               <input
                 type="text"
                 value={label}
-                onChange={(event) => setLabel(event.target.value)}
+                onChange={(event) => {
+                  setLabel(event.target.value);
+                  if (event.target.value.trim()) setLabelError(false);
+                }}
                 placeholder="例: 庭のモニュメント"
+                required
               />
+              {labelError && <span className={styles.error}>名前を入力してください</span>}
             </label>
 
             <div className={styles.saveSection}>
@@ -463,7 +541,7 @@ export function ArNewView() {
                 type="button"
                 className={styles.saveButton}
                 onClick={handleSave}
-                disabled={isSaving || !dataFile || !placement}
+                disabled={isSaving || !dataFile || !placement || !label.trim()}
               >
                 {isSaving ? "保存中..." : "保存する"}
               </button>

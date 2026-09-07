@@ -64,6 +64,13 @@
   font-size: 0.9rem;
 }
 
+.previewImage {
+  width: 100%;
+  max-width: 320px;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+}
+
 .field input[type="text"] {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;

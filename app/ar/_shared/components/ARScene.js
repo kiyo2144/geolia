@@ -208,6 +208,7 @@ export function ARScene({
   gestureDirection,
   onVertexColorDetected,
   onSplatLoaded,
+  onCanvasReady,
 }) {
   const content = (
     <>
@@ -229,11 +230,16 @@ export function ARScene({
   return (
     <Canvas
       style={CANVAS_OVERLAY_STYLE}
-      gl={{ alpha: true, antialias: true }}
+      gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
       camera={{ fov: 70, near: 0.01, far: 2000, position: [0, 0, 0] }}
       onCreated={({ gl }) => {
         // カメラ映像を透かして見せるため、描画バッファのクリア(背景)を完全透明にする
         gl.setClearAlpha(0);
+        // プレビュー画像の撮影（canvasのdrawImage）に使うため、
+        // 描画済みのcanvas要素を呼び出し元に渡す。preserveDrawingBufferを
+        // 有効にしているのは、撮影がレンダーループ外（クリック時）で
+        // 行われてもバッファが消去されずに残るようにするため。
+        onCanvasReady?.(gl.domElement);
       }}
     >
       <OrientedCamera orientation={orientation} />
