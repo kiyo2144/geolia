@@ -10,23 +10,44 @@ import styles from "./MapView.module.css";
 // map_overlay.html（既存プロトタイプ）でも実績のあるv4.7.1系を使用する。
 const { Map: MapLibreMap, NavigationControl, ScaleControl, Popup } = maplibregl;
 
-const GSI_TILES = {
-  pale: {
-    url: "https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
-    maxzoom: 18,
-  },
-  std: {
-    url: "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-    maxzoom: 18,
-  },
-  photo: {
-    url: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",
-    maxzoom: 18,
-  },
-};
-
 const GSI_ATTRIBUTION =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener noreferrer">地理院タイル</a>';
+
+const OSM_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
+
+// 背景地図の選択肢。地形表現（標高タイル）はこれとは独立した別レイヤーなので、
+// どの背景地図を選んでも同じように重ねて表示できる。
+const BASEMAP_TILES = {
+  pale: {
+    label: "地理院 淡色地図",
+    urls: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
+    maxzoom: 18,
+    attribution: GSI_ATTRIBUTION,
+  },
+  std: {
+    label: "地理院 標準地図",
+    urls: ["https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"],
+    maxzoom: 18,
+    attribution: GSI_ATTRIBUTION,
+  },
+  photo: {
+    label: "地理院 写真",
+    urls: ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"],
+    maxzoom: 18,
+    attribution: GSI_ATTRIBUTION,
+  },
+  osm: {
+    label: "OpenStreetMap",
+    urls: [
+      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    maxzoom: 19,
+    attribution: OSM_ATTRIBUTION,
+  },
+};
 
 // 国土地理院の標高タイルはCORSヘッダーを返さずブラウザから直接fetchできないため、
 // 同一オリジンのAPIルート（app/api/dem-tile）でMapbox Terrain-RGB形式に変換して配信する。
@@ -49,17 +70,21 @@ const HIRAIZUMI_MAX_BOUNDS = [
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 
+// 現在地マーカーのピン色。地図の傾き・向きに関わらず常に同じ見た目になるよう、
+// 3D立体物（fill-extrusion）ではなくDOM要素のアイコン（常にカメラ正面を向く）で表示する。
+const LOCATION_MARKER_COLOR = "#e63946";
+
 function baseStyle(kind) {
-  const tile = GSI_TILES[kind];
+  const tile = BASEMAP_TILES[kind];
   return {
     version: 8,
     sources: {
       "gsi-base": {
         type: "raster",
-        tiles: [tile.url],
+        tiles: tile.urls,
         tileSize: 256,
         maxzoom: tile.maxzoom,
-        attribution: GSI_ATTRIBUTION,
+        attribution: tile.attribution,
       },
     },
     layers: [{ id: "gsi-base-layer", type: "raster", source: "gsi-base" }],
@@ -108,6 +133,27 @@ function addDataLayers(map, landColorMode) {
   }
 }
 
+// 標高タイルによる地形起伏（試験的機能）の有効/無効を切り替える。
+// スタイル読み込み未完了時はエラーになるため、呼び出し側でtry/catchするか、
+// スタイル読み込み確認後（isStyleLoaded()）に呼び出すこと。
+function applyTerrain(map, enabled) {
+  if (enabled) {
+    if (!map.getSource("terrain-dem")) {
+      map.addSource("terrain-dem", {
+        type: "raster-dem",
+        tiles: [DEM_TILE_URL],
+        tileSize: 256,
+        minzoom: 12,
+        maxzoom: 14,
+        attribution: GSI_ATTRIBUTION,
+      });
+    }
+    map.setTerrain({ source: "terrain-dem", exaggeration: 1.5 });
+  } else {
+    map.setTerrain(null);
+  }
+}
+
 // 非表示側のバッファに新データを流し込み、描画の準備ができてから表示を入れ替える。
 function swapBufferData(map, key, bufferRef, data) {
   const activeBuffer = bufferRef.current;
@@ -132,6 +178,38 @@ function clearBufferData(map, key, bufferRef) {
   map.getSource(`${key}-${otherBuffer}`)?.setData(EMPTY_FEATURE_COLLECTION);
 }
 
+// 現在地を示すピン型アイコンのDOM要素を作成する。
+// マーカーはこの要素をmaplibre-glのレイヤーではなく地図のキャンバスコンテナに直接重ねて
+// 表示するため、地図を回転・傾けても常にカメラ正面を向いた同じ見た目になる。
+function createLocationMarkerElement() {
+  const el = document.createElement("div");
+  el.style.position = "absolute";
+  el.style.top = "0";
+  el.style.left = "0";
+  el.style.width = "28px";
+  el.style.height = "28px";
+  el.style.marginLeft = "-14px";
+  el.style.marginTop = "-28px";
+  el.style.pointerEvents = "auto";
+  el.style.cursor = "pointer";
+  el.style.display = "none";
+  el.innerHTML =
+    '<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">' +
+    `<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" fill="${LOCATION_MARKER_COLOR}" stroke="#ffffff" stroke-width="1.5"/>` +
+    '<circle cx="14" cy="12" r="4.2" fill="#ffffff"/>' +
+    "</svg>";
+  return el;
+}
+
+// (lng, lat, 高度[m]) の3次元位置を、地図の現在の傾き・回転・ズームに応じた
+// スクリーン座標（キャンバスコンテナ内のピクセル位置）に変換する。
+// maplibre-glは地形（terrain）の標高をこの仕組みで画面に投影しているため、
+// それを流用し、地形の標高の代わりに任意の高度を渡すことで実現している。
+function projectAtElevation(map, lng, lat, elevationMeters) {
+  const elevationSource = { getElevationForLngLatZoom: () => elevationMeters };
+  return map.transform.locationPoint({ lng, lat }, elevationSource);
+}
+
 export default function MapView() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -141,17 +219,28 @@ export default function MapView() {
     supabaseRef.current = createClient();
   }
 
-  const [basemap, setBasemap] = useState("pale");
+  const [basemap, setBasemap] = useState("osm");
   const [forestVisible, setForestVisible] = useState(true);
   const [landVisible, setLandVisible] = useState(false);
   const [landColorMode, setLandColorMode] = useState("koaza");
-  const [terrainEnabled, setTerrainEnabled] = useState(false);
+  const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [status, setStatus] = useState("");
+  const [locationEnabled, setLocationEnabled] = useState(true);
+  const [locationStatus, setLocationStatus] = useState("");
+  const locationWatchIdRef = useRef(null);
+  const locationMarkerElRef = useRef(null);
+  const locationPositionRef = useRef(null);
+  const updateLocationMarkerRef = useRef(() => {});
 
   const latestFlagsRef = useRef({ forestVisible, landVisible });
   useEffect(() => {
     latestFlagsRef.current = { forestVisible, landVisible };
   }, [forestVisible, landVisible]);
+
+  const terrainEnabledRef = useRef(terrainEnabled);
+  useEffect(() => {
+    terrainEnabledRef.current = terrainEnabled;
+  }, [terrainEnabled]);
 
   // 現在どちらのバッファ(a/b)が表示側になっているかを記録する
   const forestBufferRef = useRef("a");
@@ -204,11 +293,60 @@ export default function MapView() {
     setStatus("");
   }, []);
 
+  // 取得した位置情報（GeolocationCoordinates）をマーカー・ステータス表示に反映する。
+  // 常時追跡（watchPosition）と「現在地へ移動」ボタン（getCurrentPosition）の
+  // 両方から共通で呼び出す。
+  const applyLocationPosition = useCallback((coords) => {
+    const { longitude, latitude, altitude } = coords;
+    locationPositionRef.current = {
+      lng: longitude,
+      lat: latitude,
+      altitude: altitude === undefined ? null : altitude,
+    };
+    setLocationStatus(
+      locationPositionRef.current.altitude === null
+        ? "現在地を表示中（高度は取得できませんでした。地表に表示しています）"
+        : `現在地を表示中（高度 約${Math.round(locationPositionRef.current.altitude)}m）`,
+    );
+    updateLocationMarkerRef.current();
+  }, []);
+
+  const handleLocationError = useCallback((error) => {
+    const messages = {
+      1: "位置情報の利用が許可されませんでした",
+      2: "現在地を取得できませんでした",
+      3: "現在地の取得がタイムアウトしました",
+    };
+    setLocationStatus(messages[error.code] ?? "現在地の取得に失敗しました");
+  }, []);
+
+  const handleLocateClick = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLocationStatus("このブラウザは位置情報の取得に対応していません");
+      return;
+    }
+    setLocationEnabled(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        applyLocationPosition(position.coords);
+        const map = mapRef.current;
+        const { longitude, latitude } = position.coords;
+        map?.flyTo({
+          center: [longitude, latitude],
+          zoom: Math.max(map.getZoom(), 16),
+          essential: true,
+        });
+      },
+      handleLocationError,
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  }, [applyLocationPosition, handleLocationError]);
+
   // 地図の初期化（マウント時に一度だけ）
   useEffect(() => {
     const map = new MapLibreMap({
       container: mapContainerRef.current,
-      style: baseStyle("pale"),
+      style: baseStyle("osm"),
       bounds: HIRAIZUMI_DATA_BOUNDS,
       fitBoundsOptions: { padding: 40 },
       maxBounds: HIRAIZUMI_MAX_BOUNDS,
@@ -242,6 +380,11 @@ export default function MapView() {
       if (map.getSource("forest-a")) return;
       if (!map.isStyleLoaded()) return;
       addDataLayers(map, "koaza");
+      try {
+        applyTerrain(map, terrainEnabledRef.current);
+      } catch (error) {
+        console.error("地形設定の初期化に失敗しました:", error);
+      }
       refreshData();
     };
 
@@ -283,10 +426,48 @@ export default function MapView() {
       popup.setLngLat(event.lngLat).setHTML(html).addTo(map);
     });
 
+    // 現在地マーカー（DOM要素）。地形の起伏やズーム・傾きが変わるたびに
+    // 位置を再計算する必要があるため、レイヤーではなくキャンバスコンテナに
+    // 直接重ねて、地図の描画イベントに合わせて自前で位置を更新する。
+    const locationMarkerEl = createLocationMarkerElement();
+    map.getCanvasContainer().appendChild(locationMarkerEl);
+    locationMarkerElRef.current = locationMarkerEl;
+
+    const updateLocationMarkerElement = () => {
+      const pos = locationPositionRef.current;
+      if (!pos) {
+        locationMarkerEl.style.display = "none";
+        return;
+      }
+      const elevation =
+        pos.altitude !== null ? pos.altitude : map.queryTerrainElevation([pos.lng, pos.lat]) ?? 0;
+      const point = projectAtElevation(map, pos.lng, pos.lat, elevation);
+      locationMarkerEl.style.display = "";
+      locationMarkerEl.style.transform = `translate(${point.x}px, ${point.y}px)`;
+    };
+    updateLocationMarkerRef.current = updateLocationMarkerElement;
+    map.on("move", updateLocationMarkerElement);
+    map.on("render", updateLocationMarkerElement);
+
+    const locationPopup = new Popup({ closeButton: true, closeOnClick: true });
+    locationMarkerEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const pos = locationPositionRef.current;
+      if (!pos) return;
+      const altitudeText =
+        pos.altitude === null ? "高度情報なし" : `高度 約${Math.round(pos.altitude)}m`;
+      const html = `<b>現在地</b><br>緯度 ${pos.lat.toFixed(6)}　経度 ${pos.lng.toFixed(6)}<br>${altitudeText}`;
+      locationPopup.setLngLat([pos.lng, pos.lat]).setHTML(html).addTo(map);
+    });
+
     return () => {
       clearTimeout(debounceTimer);
       clearInterval(initPollTimer);
       clearTimeout(initPollTimeout);
+      map.off("move", updateLocationMarkerElement);
+      map.off("render", updateLocationMarkerElement);
+      locationMarkerEl.remove();
+      locationMarkerElRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -295,8 +476,10 @@ export default function MapView() {
 
   // 背景地図の切り替え
   // スタイル全体を作り直す(setStyle)と、森林簿・地籍・地形などのカスタムレイヤーが
-  // 一旦消えて再取得されるまで不安定に見えるため、背景ラスターソースのタイルURLだけを
-  // 差し替える。他のレイヤー・データには一切触れないので切り替えは即座かつ安定する。
+  // 一旦消えて再取得されるまで不安定に見えるため、背景ラスターレイヤーだけを
+  // 削除・再追加する（他のレイヤー・データには一切触れないので切り替えは安定する）。
+  // source.setTiles()は、inline指定のtilesを持つラスターソースの実行時更新に
+  // maplibre-gl v4.7.1で不具合があり反映されなかったため、この方式を採用する。
   // 初回マウント時（ソース未作成）はスキップする。マウント時に毎回リセットするため
   // React Strict Modeでの二重マウントでも安全。
   useEffect(() => {
@@ -305,9 +488,21 @@ export default function MapView() {
       return;
     }
     const map = mapRef.current;
-    const source = map?.getSource("gsi-base");
-    if (!source) return;
-    source.setTiles([GSI_TILES[basemap].url]);
+    if (!map || !map.getSource("gsi-base")) return;
+
+    const tile = BASEMAP_TILES[basemap];
+    if (map.getLayer("gsi-base-layer")) map.removeLayer("gsi-base-layer");
+    map.removeSource("gsi-base");
+    map.addSource("gsi-base", {
+      type: "raster",
+      tiles: tile.urls,
+      tileSize: 256,
+      maxzoom: tile.maxzoom,
+      attribution: tile.attribution,
+    });
+    // 森林簿レイヤーより手前(下)に挿入し、背景として一番下に来るようにする
+    const beforeId = map.getLayer("forest-fill-a") ? "forest-fill-a" : undefined;
+    map.addLayer({ id: "gsi-base-layer", type: "raster", source: "gsi-base" }, beforeId);
   }, [basemap]);
 
   // レイヤー表示のオン/オフ
@@ -339,25 +534,40 @@ export default function MapView() {
     if (!map) return;
 
     try {
-      if (terrainEnabled) {
-        if (!map.getSource("terrain-dem")) {
-          map.addSource("terrain-dem", {
-            type: "raster-dem",
-            tiles: [DEM_TILE_URL],
-            tileSize: 256,
-            minzoom: 12,
-            maxzoom: 14,
-            attribution: GSI_ATTRIBUTION,
-          });
-        }
-        map.setTerrain({ source: "terrain-dem", exaggeration: 1.5 });
-      } else {
-        map.setTerrain(null);
-      }
+      applyTerrain(map, terrainEnabled);
     } catch (error) {
       console.error("地形設定の変更に失敗しました:", error);
     }
   }, [terrainEnabled]);
+
+  // 現在地の常時追跡表示。マーカー自体の見た目・配置ロジックはapplyLocationPositionと
+  // updateLocationMarkerElement（地図初期化時に定義）に共通化してある。
+  // 高度が取得できる場合はその高度の3次元位置に、取得できない場合は地表面の位置に
+  // アイコンが表示される（updateLocationMarkerElement内のprojectAtElevationで判定）。
+  useEffect(() => {
+    if (!locationEnabled) {
+      locationPositionRef.current = null;
+      updateLocationMarkerRef.current();
+      if (locationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+        locationWatchIdRef.current = null;
+      }
+      return;
+    }
+
+    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => applyLocationPosition(position.coords),
+      handleLocationError,
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+
+    return () => {
+      if (locationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+        locationWatchIdRef.current = null;
+      }
+    };
+  }, [locationEnabled, applyLocationPosition, handleLocationError]);
 
   return (
     <div className={styles.wrapper}>
@@ -367,9 +577,11 @@ export default function MapView() {
         <section className={styles.section}>
           <h2>背景地図</h2>
           <select value={basemap} onChange={(event) => setBasemap(event.target.value)}>
-            <option value="pale">地理院 淡色地図</option>
-            <option value="std">地理院 標準地図</option>
-            <option value="photo">地理院 写真</option>
+            {Object.entries(BASEMAP_TILES).map(([key, tile]) => (
+              <option key={key} value={key}>
+                {tile.label}
+              </option>
+            ))}
           </select>
         </section>
 
@@ -391,6 +603,30 @@ export default function MapView() {
             />
             地籍 筆
           </label>
+        </section>
+
+        <section className={styles.section}>
+          <h2>現在地</h2>
+          <label>
+            <input
+              type="checkbox"
+              checked={locationEnabled}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                if (checked && (typeof navigator === "undefined" || !navigator.geolocation)) {
+                  setLocationStatus("このブラウザは位置情報の取得に対応していません");
+                  return;
+                }
+                if (!checked) setLocationStatus("");
+                setLocationEnabled(checked);
+              }}
+            />
+            現在地を表示する
+          </label>
+          <button type="button" onClick={handleLocateClick} className={styles.locateButton}>
+            現在地へ移動
+          </button>
+          {locationStatus && <p className={styles.status}>{locationStatus}</p>}
         </section>
 
         {landVisible && (
@@ -431,7 +667,11 @@ export default function MapView() {
         </p>
 
         <p className={styles.attribution}>
-          出典:{" "}
+          背景地図の出典:{" "}
+          <span
+            dangerouslySetInnerHTML={{ __html: BASEMAP_TILES[basemap].attribution }}
+          />
+          。地形表現は
           <a
             href="https://maps.gsi.go.jp/development/ichiran.html"
             target="_blank"
@@ -439,7 +679,7 @@ export default function MapView() {
           >
             地理院タイル
           </a>
-          。地形表現は標高タイルを加工して利用しています。
+          の標高タイルを加工して利用しています。
         </p>
       </aside>
 
