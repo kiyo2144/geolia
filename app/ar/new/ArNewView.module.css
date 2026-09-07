@@ -1,0 +1,211 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: calc(100dvh - 65px);
+  background: #0d1117;
+  color: #f0f3f7;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #161b22;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.tab {
+  flex: 1;
+  padding: 0.6rem 0.5rem;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #21262d;
+  color: #c9d1d9;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.tabActive {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+.tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel {
+  padding: 1.25rem;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.panelWide {
+  max-width: none;
+  padding: 0;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.field input[type="text"] {
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #f0f3f7;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.actions button,
+.panelOverlay button,
+.saveButton {
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: #238636;
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.actions button:disabled,
+.saveButton:disabled {
+  background: #30363d;
+  color: #8b949e;
+  cursor: not-allowed;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: #8b949e;
+}
+
+.hintSuccess {
+  color: #3fb950;
+}
+
+.error {
+  font-size: 0.85rem;
+  color: #f85149;
+}
+
+.arView {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panelOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+  background: rgba(13, 17, 23, 0.92);
+}
+
+.gestureSurface {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+}
+
+.topOverlay {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.adjustToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.adjustToolbar button {
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(13, 17, 23, 0.75);
+  color: #f0f3f7;
+  font-size: 0.8rem;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.adjustToolbar button.isActive {
+  background: #1f6feb;
+  border-color: #1f6feb;
+}
+
+.adjustToolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.adjustHint,
+.colorInfo {
+  font-size: 0.75rem;
+  color: #c9d1d9;
+  background: rgba(13, 17, 23, 0.7);
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  text-align: center;
+}
+
+.confirmDetails {
+  padding: 1rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.8;
+}
+
+.saveSection {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.6rem;
+}
+
+.saveStatus {
+  font-size: 0.85rem;
+  color: #8b949e;
+}
+
+.saveStatusSuccess {
+  color: #3fb950;
+}

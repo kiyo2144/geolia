@@ -36,9 +36,16 @@
 
 ## 4. 主要機能
 
-### 4.1 AR設置機能（`camp/test/react-components` から移植・拡張）
+### 4.1 AR設置機能（`camp/test/react-components` から移植・拡張。点群・Gaussian Splatは実装済み）
 
-既存の `ArPointCloudMockup` の3ステップ構成をベースにする。
+既存の `ArPointCloudMockup` の3ステップ構成をベースにする。点群(.ply)・Gaussian
+Splat(.spz/.splat/.ksplat/.sog)は`/ar/new`画面（[app/ar/new](../app/ar/new)、共有ロジックは
+[app/ar/_shared](../app/ar/_shared)）として実装済み。静止画・GIF・VRMデータ種別（4.1.2章）は未実装。
+
+AR配置の位置合わせは現時点でGPS＋端末コンパスのみを使用する（Android/iPhoneとも同一方式）。
+WebXR Hit Test（Android）やARKit World Tracking/Location Anchors（iPhone、Webからは
+アクセス不可）、8th Wall等の商用WebAR SDKによる特徴点・平面認識ベースの高精度配置は、
+精度向上が必要になった時点で別途費用対効果を検討する将来案として保留する。
 
 1. **① データ選択**: 配置する3Dデータ・メディアを選択（対応種別は4.1.2章参照）。
 2. **② AR配置**: カメラ・位置情報・端末の向きを使用し、

@@ -45,3 +45,6 @@ o.md
 
 # local dev-server launch config (machine-specific paths)
 .claude/
+
+# Supabase CLI local cache
+supabase/.temp/

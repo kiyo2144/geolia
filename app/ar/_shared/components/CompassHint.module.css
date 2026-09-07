@@ -1,0 +1,26 @@
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(13, 17, 23, 0.75);
+  backdrop-filter: blur(4px);
+}
+
+.arrow {
+  display: inline-block;
+  color: #4da6ff;
+  font-size: 1.1rem;
+  transition: transform 0.15s linear;
+}
+
+.distance {
+  font-size: 0.85rem;
+  color: #f0f3f7;
+}

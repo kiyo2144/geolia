@@ -1,0 +1,22 @@
+.wrapper {
+  position: relative;
+  width: 100%;
+  height: min(70dvh, 520px);
+}
+
+.mapContainer {
+  width: 100%;
+  height: 100%;
+}
+
+.distanceBadge {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 5;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  background: rgba(13, 17, 23, 0.85);
+  color: #f0f3f7;
+  font-size: 0.8rem;
+}
