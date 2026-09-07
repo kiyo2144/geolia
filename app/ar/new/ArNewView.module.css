@@ -199,6 +199,11 @@
   align-items: center;
   gap: 0.8rem;
   margin-top: 0.6rem;
+  /* 画面が低い端末でもボタンが隠れないよう、画面下部に張り付けておく */
+  position: sticky;
+  bottom: 0;
+  padding: 0.8rem 0;
+  background: #0d1117;
 }
 
 .saveStatus {
