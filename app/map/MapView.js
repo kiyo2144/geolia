@@ -228,6 +228,11 @@ export default function MapView() {
   const [landColorMode, setLandColorMode] = useState("koaza");
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [status, setStatus] = useState("");
+  // スマートフォン等の狭い画面ではサイドメニューが地図を覆ってしまうため、
+  // 初期状態は画面幅に応じて開閉を決める（デスクトップ幅では常に開いた状態にする）。
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window === "undefined" ? true : window.innerWidth > 768,
+  );
   const [locationEnabled, setLocationEnabled] = useState(true);
   const [locationStatus, setLocationStatus] = useState("");
   const locationWatchIdRef = useRef(null);
@@ -832,7 +837,26 @@ export default function MapView() {
 
   return (
     <div className={styles.wrapper}>
-      <aside className={styles.sidePane}>
+      <button
+        type="button"
+        className={styles.toggleButton}
+        onClick={() => setSidebarOpen((current) => !current)}
+        aria-label={sidebarOpen ? "サイドメニューを閉じる" : "サイドメニューを開く"}
+        aria-expanded={sidebarOpen}
+      >
+        <span className={`${styles.hamburgerIcon} ${sidebarOpen ? styles.open : ""}`}>
+          <span />
+          <span />
+          <span />
+        </span>
+      </button>
+
+      <div
+        className={`${styles.backdrop} ${sidebarOpen ? styles.open : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      <aside className={`${styles.sidePane} ${sidebarOpen ? styles.open : ""}`}>
         <h1 className={styles.title}>3Dマップ</h1>
 
         <section className={styles.section}>
