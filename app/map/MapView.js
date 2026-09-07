@@ -77,8 +77,11 @@ const LOCATION_MARKER_COLOR = "#e63946";
 // AR配置ピンの色。現在地マーカーと区別できるよう別の色にする。
 const AR_PLACEMENT_MARKER_COLOR = "#8e44ad";
 
-// OSM建物データの色（実測の高さが無いものが大半のため、単色の落ち着いた色にする）
+// OSM建物データの色（実測の高さが無いものが大半のため、単色の落ち着いた色にする）。
+// 「建物」という汎用名ではなく固有の名称（OSMのnameタグ）が付いているものは
+// 重要なスポットとみなし、目立つ色で区別する。
 const BUILDING_COLOR = "#c9b8a3";
+const NAMED_BUILDING_COLOR = "#e0a526";
 
 function baseStyle(kind) {
   const tile = BASEMAP_TILES[kind];
@@ -112,7 +115,12 @@ const BUFFER_LAYER_CONFIG = {
     ],
   },
   buildings: {
-    colorExpr: () => BUILDING_COLOR,
+    colorExpr: () => [
+      "case",
+      ["!=", ["get", "name"], null],
+      NAMED_BUILDING_COLOR,
+      BUILDING_COLOR,
+    ],
   },
 };
 
@@ -627,7 +635,10 @@ export default function MapView() {
             : p.height_source === "levels"
               ? `約${p.height}m（階数から推定）`
               : `約${p.height}m（推定値）`;
-        html = `<b>${p.name ?? "建物"}</b><br>高さ ${heightText}<br><span style="font-size:11px;color:#888;">出典: OpenStreetMap</span>`;
+        const spotBadge = p.name
+          ? `<span style="font-size:11px;color:${NAMED_BUILDING_COLOR};">注目スポット</span><br>`
+          : "";
+        html = `${spotBadge}<b>${p.name ?? "建物"}</b><br>高さ ${heightText}<br><span style="font-size:11px;color:#888;">出典: OpenStreetMap</span>`;
       } else {
         const p = feature.properties;
         html = `<b>地籍筆</b><br>小字 ${p.koaza_name ?? "-"}　地番 ${p.chiban ?? "-"}<br>精度区分 ${p.precision_class ?? "-"}`;
@@ -938,6 +949,13 @@ export default function MapView() {
             />
             OSM建物
           </label>
+          {buildingsVisible && (
+            <p className={styles.status}>
+              名称が登録されている建物（注目スポット）は
+              <span style={{ color: NAMED_BUILDING_COLOR, fontWeight: 700 }}>オレンジ色</span>
+              で表示されます
+            </p>
+          )}
         </section>
 
         <section className={styles.section}>
