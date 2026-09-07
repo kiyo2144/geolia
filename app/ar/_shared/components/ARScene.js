@@ -11,6 +11,7 @@ import { OrientedCamera } from "./OrientedCamera";
 import { PointCloudObject } from "./PointCloudObject";
 import { SparkSetup } from "./SparkSetup";
 import { SplatObject } from "./SplatObject";
+import { VrmObject } from "./VrmObject";
 
 // 「狙い撃ち」配置モードで、3Dデータをカメラの正面何メートル先に表示するか
 const AIM_DISTANCE_METERS = 2.2;
@@ -176,6 +177,8 @@ export function ARScene({
   onCanvasReady,
   decorationPresetKey,
   imageEffectKey,
+  motionPresetKey,
+  motionAssetUrl,
 }) {
   const content = (
     <>
@@ -196,6 +199,9 @@ export function ARScene({
           decorationPresetKey={decorationPresetKey}
           imageEffectKey={imageEffectKey}
         />
+      )}
+      {dataUrl && dataFormat === "vrm" && (
+        <VrmObject url={dataUrl} motionPresetKey={motionPresetKey} motionAssetUrl={motionAssetUrl} />
       )}
       {!dataUrl && <DemoPointCloud />}
     </>

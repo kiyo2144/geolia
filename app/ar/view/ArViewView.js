@@ -169,7 +169,8 @@ export function ArViewView() {
   }, [placementsWithGeometry]);
 
   const getPublicUrl = useCallback(
-    (storagePath) => supabase.storage.from("ar-assets").getPublicUrl(storagePath).data.publicUrl,
+    (storagePath, bucket = "ar-assets") =>
+      supabase.storage.from(bucket).getPublicUrl(storagePath).data.publicUrl,
     [supabase],
   );
 

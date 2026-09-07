@@ -41,6 +41,13 @@ const IMAGE_EFFECT_OPTIONS = [
   { value: "heart", label: "ハート" },
   { value: "confetti", label: "紙吹雪" },
 ];
+// VRM定型モーションの初期セット（要件定義 docs/requirements.md 4.1.3章）
+const MOTION_PRESET_OPTIONS = [
+  { value: "idle", label: "待機" },
+  { value: "wave", label: "手を振る" },
+  { value: "bow", label: "お辞儀" },
+  { value: "jump", label: "ジャンプ" },
+];
 
 // 対応データ種別ごとのファイルサイズ上限（要件定義 docs/requirements.md 4.1.4章）
 const SPLAT_EXTENSIONS = ["spz", "splat", "ksplat", "sog"];
@@ -50,8 +57,17 @@ const FILE_SIZE_LIMITS_BYTES = {
   splat: 50 * 1024 * 1024,
   image: 20 * 1024 * 1024,
   gif: 20 * 1024 * 1024,
+  vrm: 50 * 1024 * 1024,
 };
-const FILE_SIZE_LIMIT_LABELS = { ply: "100MB", splat: "50MB", image: "20MB", gif: "20MB" };
+const FILE_SIZE_LIMIT_LABELS = {
+  ply: "100MB",
+  splat: "50MB",
+  image: "20MB",
+  gif: "20MB",
+  vrm: "50MB",
+};
+const MOTION_FILE_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
+const MOTION_FILE_SIZE_LIMIT_LABEL = "10MB";
 
 function getFileFormat(file) {
   if (!file) return null;
@@ -59,12 +75,13 @@ function getFileFormat(file) {
   return match ? match[1] : null;
 }
 
-// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIFのどれとして読むかを判定する
+// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIF・VRMのどれとして読むかを判定する
 function getDataFormat(file) {
   const format = getFileFormat(file);
   if (!format) return null;
   if (SPLAT_EXTENSIONS.includes(format)) return "splat";
   if (format === "gif") return "gif";
+  if (format === "vrm") return "vrm";
   if (IMAGE_EXTENSIONS.includes(format)) return "image";
   return "ply";
 }
@@ -72,6 +89,7 @@ function getDataFormat(file) {
 function getAssetType(dataFormat) {
   if (dataFormat === "splat") return "gaussian_splat";
   if (dataFormat === "image" || dataFormat === "gif") return "image";
+  if (dataFormat === "vrm") return "vrm";
   return "point_cloud";
 }
 
@@ -94,6 +112,11 @@ export function ArNewView() {
   // 画像・GIF用: 装飾フレーム('none' | 'white' | 'polaroid')とエフェクト('none' | 'sparkle' | 'heart' | 'confetti')
   const [decorationPresetKey, setDecorationPresetKey] = useState("none");
   const [imageEffectKey, setImageEffectKey] = useState("none");
+  // VRM用: モーションの与え方('preset'=定型モーション | 'upload'=モーションファイルをアップロード)
+  const [motionSourceMode, setMotionSourceMode] = useState("preset");
+  const [motionPresetKey, setMotionPresetKey] = useState("idle");
+  const [motionFile, setMotionFile] = useState(null);
+  const [motionFileError, setMotionFileError] = useState(null);
   const [label, setLabel] = useState("");
   const [labelError, setLabelError] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -124,6 +147,18 @@ export function ArNewView() {
       if (dataUrl) URL.revokeObjectURL(dataUrl);
     };
   }, [dataUrl]);
+
+  // VRM用: アップロードされたモーションファイル(.vrma)の一時URL
+  const motionFileUrl = useMemo(
+    () => (motionFile ? URL.createObjectURL(motionFile) : null),
+    [motionFile],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (motionFileUrl) URL.revokeObjectURL(motionFileUrl);
+    };
+  }, [motionFileUrl]);
 
   // プレビュー画像（Blob）の表示用URL
   const previewUrl = useMemo(
@@ -187,6 +222,34 @@ export function ArNewView() {
     setColorInfo(null);
     setDecorationPresetKey("none");
     setImageEffectKey("none");
+    setMotionSourceMode("preset");
+    setMotionPresetKey("idle");
+    setMotionFile(null);
+    setMotionFileError(null);
+    setIsSaved(false);
+  };
+
+  const handleMotionFileChange = (event) => {
+    const file = event.target.files?.[0] ?? null;
+    if (file) {
+      const format = getFileFormat(file);
+      if (format !== "vrma") {
+        setMotionFileError("モーションファイルは.vrma形式のみ対応しています");
+        setMotionFile(null);
+        event.target.value = "";
+        return;
+      }
+      if (file.size > MOTION_FILE_SIZE_LIMIT_BYTES) {
+        setMotionFileError(
+          `ファイルサイズが上限（${MOTION_FILE_SIZE_LIMIT_LABEL}）を超えています`,
+        );
+        setMotionFile(null);
+        event.target.value = "";
+        return;
+      }
+    }
+    setMotionFileError(null);
+    setMotionFile(file);
     setIsSaved(false);
   };
 
@@ -315,6 +378,31 @@ export function ArNewView() {
         }
       }
 
+      // VRM用: モーションファイルがアップロードされていれば、専用バケット・テーブルに登録する
+      let motionAssetId = null;
+      if (dataFormat === "vrm" && motionSourceMode === "upload" && motionFile) {
+        setSaveStatus("モーションファイルをアップロード中...");
+        const motionStoragePath = `${crypto.randomUUID()}.vrma`;
+        const { error: motionUploadError } = await supabase.storage
+          .from("ar-motion-assets")
+          .upload(motionStoragePath, motionFile, {
+            contentType: motionFile.type || "application/octet-stream",
+          });
+        if (motionUploadError) throw motionUploadError;
+
+        const { data: motionAssetRow, error: motionAssetError } = await supabase
+          .from("ar_motion_assets")
+          .insert({
+            storage_path: motionStoragePath,
+            original_filename: motionFile.name,
+            format: "vrma",
+          })
+          .select()
+          .single();
+        if (motionAssetError) throw motionAssetError;
+        motionAssetId = motionAssetRow.id;
+      }
+
       setSaveStatus("データを登録中...");
       const { data: assetRow, error: assetError } = await supabase
         .from("ar_data_assets")
@@ -344,6 +432,9 @@ export function ArNewView() {
         decoration_preset_key:
           dataFormat === "image" || dataFormat === "gif" ? decorationPresetKey : null,
         image_effect_key: dataFormat === "image" || dataFormat === "gif" ? imageEffectKey : null,
+        motion_preset_key:
+          dataFormat === "vrm" && motionSourceMode === "preset" ? motionPresetKey : null,
+        motion_asset_id: dataFormat === "vrm" && motionSourceMode === "upload" ? motionAssetId : null,
       });
       if (placementError) throw placementError;
 
@@ -365,6 +456,9 @@ export function ArNewView() {
     previewBlob,
     decorationPresetKey,
     imageEffectKey,
+    motionSourceMode,
+    motionPresetKey,
+    motionFile,
     supabase,
   ]);
 
@@ -392,17 +486,17 @@ export function ArNewView() {
           <h2>3Dデータ・メディアの配置</h2>
           <p>
             点群（.ply）、Gaussian Splat（.spz / .splat / .ksplat / .sog）、
-            静止画・GIF（.jpg / .png / .webp / .gif）から選択してください。
-            設置場所は「② AR配置」でカメラを見ながら決めます
+            静止画・GIF（.jpg / .png / .webp / .gif）、VRoid Studioデータ（.vrm）
+            から選択してください。設置場所は「② AR配置」でカメラを見ながら決めます
             （現在地をそのまま使う場合はここで先に記録することもできます）。
             ファイルを選択しない場合はデモ用の点群で動作確認できます。
           </p>
 
           <label className={styles.field}>
-            データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif)
+            データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif / .vrm)
             <input
               type="file"
-              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif"
+              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm"
               onChange={handleFileChange}
             />
           </label>
@@ -443,6 +537,61 @@ export function ArNewView() {
                   </label>
                 ))}
               </div>
+            </div>
+          )}
+
+          {dataFormat === "vrm" && (
+            <div className={styles.field}>
+              <p>モーション</p>
+              <div className={styles.actions}>
+                <label>
+                  <input
+                    type="radio"
+                    name="motionSourceMode"
+                    value="preset"
+                    checked={motionSourceMode === "preset"}
+                    onChange={() => setMotionSourceMode("preset")}
+                  />
+                  定型モーションを使う
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="motionSourceMode"
+                    value="upload"
+                    checked={motionSourceMode === "upload"}
+                    onChange={() => setMotionSourceMode("upload")}
+                  />
+                  モーションファイルをアップロードする
+                </label>
+              </div>
+
+              {motionSourceMode === "preset" ? (
+                <div className={styles.actions}>
+                  {MOTION_PRESET_OPTIONS.map((option) => (
+                    <label key={option.value}>
+                      <input
+                        type="radio"
+                        name="motionPreset"
+                        value={option.value}
+                        checked={motionPresetKey === option.value}
+                        onChange={() => setMotionPresetKey(option.value)}
+                      />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <label className={styles.field}>
+                  モーションファイル (.vrma)
+                  <input type="file" accept=".vrma" onChange={handleMotionFileChange} />
+                </label>
+              )}
+
+              {motionFileError && <p className={styles.error}>{motionFileError}</p>}
+              {motionSourceMode === "upload" && motionFile && (
+                <p className={styles.hint}>選択中: {motionFile.name}</p>
+              )}
             </div>
           )}
 
@@ -500,6 +649,8 @@ export function ArNewView() {
                 }}
                 decorationPresetKey={decorationPresetKey}
                 imageEffectKey={imageEffectKey}
+                motionPresetKey={motionSourceMode === "preset" ? motionPresetKey : null}
+                motionAssetUrl={motionSourceMode === "upload" ? motionFileUrl : null}
               />
 
               {arSubMode === "fine-tune" && (
@@ -628,7 +779,13 @@ export function ArNewView() {
                 type="button"
                 className={styles.saveButton}
                 onClick={handleSave}
-                disabled={isSaving || !dataFile || !placement || !label.trim()}
+                disabled={
+                  isSaving ||
+                  !dataFile ||
+                  !placement ||
+                  !label.trim() ||
+                  (dataFormat === "vrm" && motionSourceMode === "upload" && !motionFile)
+                }
               >
                 {isSaving ? "保存中..." : "保存する"}
               </button>

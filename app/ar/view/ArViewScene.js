@@ -9,6 +9,7 @@ import { PlacementLabelSprite } from "../_shared/components/PlacementLabelSprite
 import { PointCloudObject } from "../_shared/components/PointCloudObject";
 import { SparkSetup } from "../_shared/components/SparkSetup";
 import { SplatObject } from "../_shared/components/SplatObject";
+import { VrmObject } from "../_shared/components/VrmObject";
 
 // React Three Fiber の <Canvas> は position/pointerEvents 等を自前のインラインstyleで
 // 持っているため、外部CSSクラスでは上書きできない。style props で直接渡す必要がある。
@@ -19,8 +20,8 @@ const CANVAS_OVERLAY_STYLE = {
   pointerEvents: "none",
 };
 
-/** 詳細表示: 実データ(点群/Gaussian Splat/静止画/GIF)を読み込んで表示する */
-function DetailedPlacement({ placement, url }) {
+/** 詳細表示: 実データ(点群/Gaussian Splat/静止画/GIF/VRM)を読み込んで表示する */
+function DetailedPlacement({ placement, url, motionAssetUrl }) {
   return (
     <group rotation={[placement.rotation_x ?? 0, placement.rotation_y ?? 0, 0]} scale={placement.scale ?? 1}>
       {placement.asset_type === "gaussian_splat" ? (
@@ -39,6 +40,12 @@ function DetailedPlacement({ placement, url }) {
             imageEffectKey={placement.image_effect_key}
           />
         )
+      ) : placement.asset_type === "vrm" ? (
+        <VrmObject
+          url={url}
+          motionPresetKey={placement.motion_preset_key}
+          motionAssetUrl={motionAssetUrl}
+        />
       ) : (
         <PointCloudObject url={url} />
       )}
@@ -77,6 +84,11 @@ export function ArViewScene({ orientation, placements, getPublicUrl }) {
               <DetailedPlacement
                 placement={placement}
                 url={getPublicUrl(placement.storage_path)}
+                motionAssetUrl={
+                  placement.motion_storage_path
+                    ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
+                    : null
+                }
               />
             </Suspense>
           ) : (
