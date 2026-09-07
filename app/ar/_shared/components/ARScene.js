@@ -3,7 +3,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { latLngToLocalMeters } from "../lib/geoMath";
+import { latLngToLocalMeters } from "../../../_shared/lib/geoMath";
 import { DemoPointCloud } from "./DemoPointCloud";
 import { OrientedCamera } from "./OrientedCamera";
 import { PointCloudObject } from "./PointCloudObject";

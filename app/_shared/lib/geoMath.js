@@ -1,4 +1,5 @@
 // 緯度経度に関する幾何計算。camp/test/react-components の同名モジュールを移植したもの。
+// app/ar・app/placements など、地図・AR関連の複数画面から共用する。
 
 const EARTH_RADIUS_METERS = 6378137;
 

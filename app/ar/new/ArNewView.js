@@ -9,8 +9,8 @@ import { useArGestureControls } from "../_shared/hooks/useArGestureControls";
 import { useCameraStream } from "../_shared/hooks/useCameraStream";
 import { useDeviceOrientation } from "../_shared/hooks/useDeviceOrientation";
 import { useGeolocation } from "../_shared/hooks/useGeolocation";
-import { localMetersToLatLng } from "../_shared/lib/geoMath";
-import { PlacementConfirmMap } from "./PlacementConfirmMap";
+import { localMetersToLatLng } from "../../_shared/lib/geoMath";
+import { PlacementLocationMap } from "../../_shared/components/PlacementLocationMap";
 import styles from "./ArNewView.module.css";
 
 const STEPS = [
@@ -503,7 +503,7 @@ export function ArNewView() {
         <section className={`${styles.panel} ${styles.panelWide}`}>
           <div className={styles.confirmDetails}>
             <h2>設置場所の確認・保存</h2>
-            <PlacementConfirmMap userPosition={geolocation.position} targetPosition={placement} />
+            <PlacementLocationMap userPosition={geolocation.position} targetPosition={placement} />
 
             {placement && (
               <p className={styles.hint}>

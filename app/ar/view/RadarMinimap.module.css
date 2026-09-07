@@ -75,3 +75,10 @@
 .tooltipDistance {
   color: #c9d1d9;
 }
+
+.tooltipLink {
+  display: inline-block;
+  margin-top: 0.4rem;
+  color: #4da6ff;
+  font-weight: 600;
+}

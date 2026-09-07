@@ -1,10 +1,9 @@
-import { PlaceholderPage } from "../components/PlaceholderPage";
+import { PlacementsListView } from "./PlacementsListView";
+
+export const metadata = {
+  title: "配置一覧 | geolia",
+};
 
 export default function PlacementsPage() {
-  return (
-    <PlaceholderPage
-      title="配置一覧"
-      description="保存済みのAR配置を一覧・検索できる画面です。"
-    />
-  );
+  return <PlacementsListView />;
 }

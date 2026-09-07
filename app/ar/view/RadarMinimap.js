@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import styles from "./RadarMinimap.module.css";
 
@@ -11,7 +12,7 @@ const MAX_RADIUS = CENTER - 12;
  * 画面右下に常時表示する円形のミニマップ（要件定義 docs/requirements.md 4.2.2章）。
  * 現在地を中心に、取得済みの配置を点として表示し、カメラの向き基準で回転させる
  * （常に「上」＝現在向いている方向になる）。視野内は目立つ色、視野外は薄い色で区別する。
- * 配置一覧画面が未実装のため、タップ時は詳細画面へのジャンプではなく簡単な情報表示のみ行う。
+ * タップすると簡易情報と、配置詳細画面（/placements/[id]）へのリンクを表示する。
  */
 export function RadarMinimap({ heading, placements, radiusMeters }) {
   const [selected, setSelected] = useState(null);
@@ -55,6 +56,9 @@ export function RadarMinimap({ heading, placements, radiusMeters }) {
           </button>
           <p className={styles.tooltipLabel}>{selected.label ?? "AR配置"}</p>
           <p className={styles.tooltipDistance}>現在地から約{Math.round(selected.distance_meters)}m</p>
+          <Link href={`/placements/${selected.id}`} className={styles.tooltipLink}>
+            詳細を見る
+          </Link>
         </div>
       )}
     </div>

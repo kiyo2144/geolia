@@ -11,7 +11,7 @@ import {
   circularDiffDegrees,
   haversineDistanceMeters,
   latLngToLocalMeters,
-} from "../_shared/lib/geoMath";
+} from "../../_shared/lib/geoMath";
 import { ArViewScene } from "./ArViewScene";
 import { RadarMinimap } from "./RadarMinimap";
 import styles from "./ArViewView.module.css";

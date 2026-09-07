@@ -3,22 +3,23 @@
 import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { haversineDistanceMeters } from "../_shared/lib/geoMath";
-import styles from "./PlacementConfirmMap.module.css";
+import { haversineDistanceMeters } from "../lib/geoMath";
+import styles from "./PlacementLocationMap.module.css";
 
 const { Map: MapLibreMap, Marker } = maplibregl;
 
-// 設置確認用の簡易マップは2D・低ズームの平面表示のみで十分なため、
+// 設置確認・詳細表示用の簡易マップは2D・低ズームの平面表示のみで十分なため、
 // /map画面の3D表示とは切り離し、地理院淡色地図のみを使うシンプルな構成にする。
 const BASEMAP_TILE_URL = "https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png";
 const GSI_ATTRIBUTION =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener noreferrer">地理院タイル</a>';
 
 /**
- * 「③ 地図で確認」ステップ用の簡易マップ。ユーザーの現在地と設置場所を
- * それぞれマーカーで表示し、破線で結んで距離を示す。
+ * AR配置の場所を地図上で確認するための簡易マップ。
+ * userPosition（現在地）が無い場合はtargetPosition（設置場所）のみを表示する
+ * （AR設置の「③ 確認・保存」ではユーザーの現在地を、配置詳細画面では設置場所のみを表示する）。
  */
-export function PlacementConfirmMap({ userPosition, targetPosition }) {
+export function PlacementLocationMap({ userPosition, targetPosition }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const userMarkerRef = useRef(null);
@@ -115,6 +116,8 @@ export function PlacementConfirmMap({ userPosition, targetPosition }) {
         );
         bounds.extend([targetPosition.lng, targetPosition.lat]);
         map.fitBounds(bounds, { padding: 80, maxZoom: 19 });
+      } else if (targetPosition) {
+        map.setCenter([targetPosition.lng, targetPosition.lat]);
       }
     };
 

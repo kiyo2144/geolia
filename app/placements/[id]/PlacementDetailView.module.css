@@ -1,0 +1,72 @@
+.wrapper {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  font-family: var(--font-geist-sans);
+}
+
+.backLink {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.error {
+  font-size: 13px;
+  color: #d64545;
+}
+
+.previewImage {
+  width: 100%;
+  max-width: 400px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 16px;
+  display: block;
+}
+
+.detailList {
+  margin: 20px 0;
+  font-size: 14px;
+}
+
+.detailList dt {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.detailList dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+
+.actions {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.arViewButton {
+  display: inline-block;
+  padding: 10px 18px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: 14px;
+  font-weight: 600;
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { bearingDegrees, haversineDistanceMeters } from "../lib/geoMath";
+import { bearingDegrees, haversineDistanceMeters } from "../../../_shared/lib/geoMath";
 import styles from "./CompassHint.module.css";
 
 /**

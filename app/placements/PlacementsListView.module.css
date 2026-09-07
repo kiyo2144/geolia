@@ -1,0 +1,98 @@
+.wrapper {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  font-family: var(--font-geist-sans);
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.error {
+  font-size: 13px;
+  color: #d64545;
+  margin-bottom: 16px;
+}
+
+.searchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.card {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: inherit;
+}
+
+.card:hover {
+  background: var(--border-color);
+}
+
+.thumbnail {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--border-color);
+}
+
+.thumbnailImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumbnailPlaceholder {
+  width: 100%;
+  height: 100%;
+}
+
+.cardBody {
+  min-width: 0;
+}
+
+.cardLabel {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardMeta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}

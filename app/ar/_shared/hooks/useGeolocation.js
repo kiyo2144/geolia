@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { haversineDistanceMeters } from "../lib/geoMath";
+import { haversineDistanceMeters } from "../../../_shared/lib/geoMath";
 
 // 位置の平滑化・ワープ防止（要件定義 docs/requirements.md 4.1.1章の初期値）
 const MAX_ACCURACY_METERS = 30; // 精度ゲート: これを超える誤差半径のfixは採用しない
