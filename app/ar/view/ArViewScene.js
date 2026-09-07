@@ -2,6 +2,8 @@
 
 import { Canvas } from "@react-three/fiber";
 import { Suspense } from "react";
+import { AnimatedGifPlaneObject } from "../_shared/components/AnimatedGifPlaneObject";
+import { ImagePlaneObject } from "../_shared/components/ImagePlaneObject";
 import { OrientedCamera } from "../_shared/components/OrientedCamera";
 import { PlacementLabelSprite } from "../_shared/components/PlacementLabelSprite";
 import { PointCloudObject } from "../_shared/components/PointCloudObject";
@@ -17,12 +19,26 @@ const CANVAS_OVERLAY_STYLE = {
   pointerEvents: "none",
 };
 
-/** 詳細表示: 実データ(点群/Gaussian Splat)を読み込んで表示する */
+/** 詳細表示: 実データ(点群/Gaussian Splat/静止画/GIF)を読み込んで表示する */
 function DetailedPlacement({ placement, url }) {
   return (
     <group rotation={[placement.rotation_x ?? 0, placement.rotation_y ?? 0, 0]} scale={placement.scale ?? 1}>
       {placement.asset_type === "gaussian_splat" ? (
         <SplatObject url={url} />
+      ) : placement.asset_type === "image" ? (
+        placement.format === "gif" ? (
+          <AnimatedGifPlaneObject
+            url={url}
+            decorationPresetKey={placement.decoration_preset_key}
+            imageEffectKey={placement.image_effect_key}
+          />
+        ) : (
+          <ImagePlaneObject
+            url={url}
+            decorationPresetKey={placement.decoration_preset_key}
+            imageEffectKey={placement.image_effect_key}
+          />
+        )
       ) : (
         <PointCloudObject url={url} />
       )}

@@ -39,8 +39,9 @@
 ### 4.1 AR設置機能（`camp/test/react-components` から移植・拡張。点群・Gaussian Splatは実装済み）
 
 既存の `ArPointCloudMockup` の3ステップ構成をベースにする。点群(.ply)・Gaussian
-Splat(.spz/.splat/.ksplat/.sog)は`/ar/new`画面（[app/ar/new](../app/ar/new)、共有ロジックは
-[app/ar/_shared](../app/ar/_shared)）として実装済み。静止画・GIF・VRMデータ種別（4.1.2章）は未実装。
+Splat(.spz/.splat/.ksplat/.sog)・静止画/GIF(.jpg/.png/.webp/.gif)は`/ar/new`画面
+（[app/ar/new](../app/ar/new)、共有ロジックは[app/ar/_shared](../app/ar/_shared)）として実装済み。
+VRMデータ種別（4.1.2章）は未実装。
 
 AR配置の位置合わせは現時点でGPS＋端末コンパスのみを使用する（Android/iPhoneとも同一方式）。
 WebXR Hit Test（Android）やARKit World Tracking/Location Anchors（iPhone、Webからは
@@ -101,7 +102,7 @@ WebXR Hit Test（Android）やARKit World Tracking/Location Anchors（iPhone、W
 |---|---|---|
 | 点群 | `.ply` | 既存どおり |
 | Gaussian Splat | `.spz` `.splat` `.ksplat` `.sog` | 既存どおり |
-| 静止画・GIF（新規） | `.jpg` `.png` `.webp` `.gif` | 板ポリゴンに投影して表示。GIFはアニメーションとして再生する。SNSのスタンプ機能のような簡単なエフェクト（例: キラキラ・ハートなどの演出）や、あらかじめ用意された装飾フレームを重ねて表示できるようにする（エフェクト・フレームの具体的な種類は10章で選定） |
+| 静止画・GIF（実装済み） | `.jpg` `.png` `.webp` `.gif` | 板ポリゴンに投影して表示。GIFはアニメーションとして再生する。SNSのスタンプ機能のような簡単なエフェクト（例: キラキラ・ハートなどの演出）や、あらかじめ用意された装飾フレームを重ねて表示できるようにする（エフェクト・フレームの具体的な種類は10章で選定・4.1.3章参照） |
 | VRoid Studioデータ（新規） | `.vrm` | 人型アバターとして表示（`@pixiv/three-vrm` 等のVRM対応ライブラリを利用）。アニメーションは次の両方に対応する: (a) アプリ側があらかじめ用意した定型モーション（待機・手振りなど）から選んで自動再生、(b) ユーザーが別途モーションファイル（VRMA等）をアップロードして適用 |
 
 技術メモ:
@@ -142,14 +143,14 @@ WebXR Hit Test（Android）やARKit World Tracking/Location Anchors（iPhone、W
 - 上記は初期値。デプロイ後の使用感を見て変更する可能性がある。
 - Supabase Freeプラン（ストレージ合計1GB）を前提とするため、`ar-assets`・`ar-motion-assets`・`geo-datasets`（4.4.5章）の合計使用量が積み上がる点に留意し、利用状況を見ながらProプランへの移行を検討する（個人単位の利用量上限などは今回のスコープ外）。
 
-### 4.2 AR閲覧機能（実装済み。点群・Gaussian Splatのみ対応）
+### 4.2 AR閲覧機能（実装済み。点群・Gaussian Splat・静止画/GIFに対応、VRMは未対応）
 
 `/ar/view`画面（[app/ar/view](../app/ar/view)）として実装済み。画面構成（5章）では
 `/ar/view/[id]`（特定配置を起点に開く形）を想定していたが、本章の「現在地周辺を
 まとめて表示する」という仕様上、特定の1件に紐づくURLは実質的な意味を持たないため、
 `[id]`無しの`/ar/view`（ナビゲーションから直接開く一覧的な画面）として実装した。
-静止画・GIF・VRM（4.1.2章）はAR設置機能側が未対応のため、本画面でも点群・Gaussian
-Splatのみを描画する。レーダー（4.2.2章）のタップ操作は、簡易情報のポップアップ表示に
+VRM（4.1.2章）はAR設置機能側が未対応のため、本画面でも点群・Gaussian
+Splat・静止画/GIFのみを描画する。レーダー（4.2.2章）のタップ操作は、簡易情報のポップアップ表示に
 加え、配置詳細画面（`/placements/[id]`）へのリンクも表示する。
 
 - 特定の1件を選んで見るのではなく、**現在地の周辺にある配置をできるだけ多く同時にAR空間内へ表示する**（画面がにぎやかになることを優先する方針）。
@@ -402,8 +403,10 @@ create table public.ar_placements (
   -- VRM用: 定型モーションのキー、またはアップロードされたモーション資産への参照(いずれか一方、両方NULLも可)
   motion_preset_key text,
   motion_asset_id uuid references public.ar_motion_assets(id),
-  -- 画像用: あらかじめ用意された装飾フレーム/エフェクトのキー
+  -- 画像用: あらかじめ用意された装飾フレームのキー
   decoration_preset_key text,
+  -- 画像用: あらかじめ用意されたエフェクトのキー
+  image_effect_key text,
   geom geometry(Point, 4326)
     generated always as (st_setsrid(st_makepoint(lng, lat), 4326)) stored,
   created_at timestamptz not null default now()
@@ -540,7 +543,9 @@ Vite製のためNext.js App Routerへの移植時に以下の対応が必要。
 | `components/map/LocationMap.jsx` | `leaflet` / `react-leaflet` もSSR不可。同様に動的importが必要 |
 | `useGeolocation` | 高度(altitude)の保持・利用箇所を追加する改修が必要（現状は lat/lng のみ利用） |
 
-新規データ種別（4.1.2章）に対応するため、`ARScene` 配下に画像・GIF表示コンポーネントとVRM表示コンポーネント（`@pixiv/three-vrm` 利用）を追加する。
+新規データ種別（4.1.2章）に対応するため、`ARScene` 配下に画像・GIF表示コンポーネント
+（`ImagePlaneObject` `AnimatedGifPlaneObject` `ImageEffectParticles`、実装済み）と
+VRM表示コンポーネント（`@pixiv/three-vrm` 利用、未実装）を追加する。
 
 ### 7.2 `camp/map/map_overlay.html`（MapLibre 3D重ね合わせ）
 

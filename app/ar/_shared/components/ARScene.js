@@ -4,7 +4,9 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { latLngToLocalMeters } from "../../../_shared/lib/geoMath";
+import { AnimatedGifPlaneObject } from "./AnimatedGifPlaneObject";
 import { DemoPointCloud } from "./DemoPointCloud";
+import { ImagePlaneObject } from "./ImagePlaneObject";
 import { OrientedCamera } from "./OrientedCamera";
 import { PointCloudObject } from "./PointCloudObject";
 import { SparkSetup } from "./SparkSetup";
@@ -172,12 +174,28 @@ export function ARScene({
   onVertexColorDetected,
   onSplatLoaded,
   onCanvasReady,
+  decorationPresetKey,
+  imageEffectKey,
 }) {
   const content = (
     <>
       {dataUrl && dataFormat === "splat" && <SplatObject url={dataUrl} onLoaded={onSplatLoaded} />}
       {dataUrl && dataFormat === "ply" && (
         <PointCloudObject url={dataUrl} onVertexColorDetected={onVertexColorDetected} />
+      )}
+      {dataUrl && dataFormat === "image" && (
+        <ImagePlaneObject
+          url={dataUrl}
+          decorationPresetKey={decorationPresetKey}
+          imageEffectKey={imageEffectKey}
+        />
+      )}
+      {dataUrl && dataFormat === "gif" && (
+        <AnimatedGifPlaneObject
+          url={dataUrl}
+          decorationPresetKey={decorationPresetKey}
+          imageEffectKey={imageEffectKey}
+        />
       )}
       {!dataUrl && <DemoPointCloud />}
     </>

@@ -29,9 +29,29 @@ const MAX_SCALE = 50;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+// 画像・GIF用の装飾フレーム／エフェクトの初期セット（要件定義 docs/requirements.md 4.1.3章）
+const DECORATION_OPTIONS = [
+  { value: "none", label: "なし" },
+  { value: "white", label: "シンプル白枠" },
+  { value: "polaroid", label: "ポラロイド風" },
+];
+const IMAGE_EFFECT_OPTIONS = [
+  { value: "none", label: "なし" },
+  { value: "sparkle", label: "キラキラ" },
+  { value: "heart", label: "ハート" },
+  { value: "confetti", label: "紙吹雪" },
+];
+
 // 対応データ種別ごとのファイルサイズ上限（要件定義 docs/requirements.md 4.1.4章）
 const SPLAT_EXTENSIONS = ["spz", "splat", "ksplat", "sog"];
-const FILE_SIZE_LIMITS_BYTES = { ply: 100 * 1024 * 1024, splat: 50 * 1024 * 1024 };
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
+const FILE_SIZE_LIMITS_BYTES = {
+  ply: 100 * 1024 * 1024,
+  splat: 50 * 1024 * 1024,
+  image: 20 * 1024 * 1024,
+  gif: 20 * 1024 * 1024,
+};
+const FILE_SIZE_LIMIT_LABELS = { ply: "100MB", splat: "50MB", image: "20MB", gif: "20MB" };
 
 function getFileFormat(file) {
   if (!file) return null;
@@ -39,15 +59,20 @@ function getFileFormat(file) {
   return match ? match[1] : null;
 }
 
-// 拡張子から、点群(PLY)として読むかGaussian Splatとして読むかを判定する
+// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIFのどれとして読むかを判定する
 function getDataFormat(file) {
   const format = getFileFormat(file);
   if (!format) return null;
-  return SPLAT_EXTENSIONS.includes(format) ? "splat" : "ply";
+  if (SPLAT_EXTENSIONS.includes(format)) return "splat";
+  if (format === "gif") return "gif";
+  if (IMAGE_EXTENSIONS.includes(format)) return "image";
+  return "ply";
 }
 
 function getAssetType(dataFormat) {
-  return dataFormat === "splat" ? "gaussian_splat" : "point_cloud";
+  if (dataFormat === "splat") return "gaussian_splat";
+  if (dataFormat === "image" || dataFormat === "gif") return "image";
+  return "point_cloud";
 }
 
 export function ArNewView() {
@@ -66,6 +91,9 @@ export function ArNewView() {
   const [gestureDirection, setGestureDirection] = useState(0);
   // null | 'original'(元データの色) | 'gradient'(色情報が無く高さで自動着色)
   const [colorInfo, setColorInfo] = useState(null);
+  // 画像・GIF用: 装飾フレーム('none' | 'white' | 'polaroid')とエフェクト('none' | 'sparkle' | 'heart' | 'confetti')
+  const [decorationPresetKey, setDecorationPresetKey] = useState("none");
+  const [imageEffectKey, setImageEffectKey] = useState("none");
   const [label, setLabel] = useState("");
   const [labelError, setLabelError] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -146,7 +174,7 @@ export function ArNewView() {
       const limitBytes = FILE_SIZE_LIMITS_BYTES[format];
       if (file.size > limitBytes) {
         setFileError(
-          `ファイルサイズが上限（${format === "ply" ? "100MB" : "50MB"}）を超えています`,
+          `ファイルサイズが上限（${FILE_SIZE_LIMIT_LABELS[format]}）を超えています`,
         );
         setDataFile(null);
         setColorInfo(null);
@@ -157,6 +185,8 @@ export function ArNewView() {
     setFileError(null);
     setDataFile(file);
     setColorInfo(null);
+    setDecorationPresetKey("none");
+    setImageEffectKey("none");
     setIsSaved(false);
   };
 
@@ -311,6 +341,9 @@ export function ArNewView() {
         scale: adjustment.scale,
         vertical_offset: adjustment.y,
         preview_storage_path: previewStoragePath,
+        decoration_preset_key:
+          dataFormat === "image" || dataFormat === "gif" ? decorationPresetKey : null,
+        image_effect_key: dataFormat === "image" || dataFormat === "gif" ? imageEffectKey : null,
       });
       if (placementError) throw placementError;
 
@@ -322,7 +355,18 @@ export function ArNewView() {
     } finally {
       setIsSaving(false);
     }
-  }, [dataFile, dataFormat, placement, adjustment, label, finalAltitude, previewBlob, supabase]);
+  }, [
+    dataFile,
+    dataFormat,
+    placement,
+    adjustment,
+    label,
+    finalAltitude,
+    previewBlob,
+    decorationPresetKey,
+    imageEffectKey,
+    supabase,
+  ]);
 
   return (
     <div className={styles.wrapper}>
@@ -345,21 +389,62 @@ export function ArNewView() {
 
       {step === "upload" && (
         <section className={styles.panel}>
-          <h2>3Dデータの配置</h2>
+          <h2>3Dデータ・メディアの配置</h2>
           <p>
-            点群（.ply）またはGaussian Splat（.spz / .splat / .ksplat /
-            .sog）データを選択してください。設置場所は「② AR配置」でカメラを見ながら決めます
+            点群（.ply）、Gaussian Splat（.spz / .splat / .ksplat / .sog）、
+            静止画・GIF（.jpg / .png / .webp / .gif）から選択してください。
+            設置場所は「② AR配置」でカメラを見ながら決めます
             （現在地をそのまま使う場合はここで先に記録することもできます）。
             ファイルを選択しない場合はデモ用の点群で動作確認できます。
           </p>
 
           <label className={styles.field}>
-            3Dデータファイル (.ply / .spz / .splat / .ksplat / .sog)
-            <input type="file" accept=".ply,.spz,.splat,.ksplat,.sog" onChange={handleFileChange} />
+            データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif)
+            <input
+              type="file"
+              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif"
+              onChange={handleFileChange}
+            />
           </label>
 
           {fileError && <p className={styles.error}>{fileError}</p>}
           {dataFile && <p className={styles.hint}>選択中: {dataFile.name}</p>}
+
+          {(dataFormat === "image" || dataFormat === "gif") && (
+            <div className={styles.field}>
+              <p>装飾フレーム</p>
+              <div className={styles.actions}>
+                {DECORATION_OPTIONS.map((option) => (
+                  <label key={option.value}>
+                    <input
+                      type="radio"
+                      name="decorationPreset"
+                      value={option.value}
+                      checked={decorationPresetKey === option.value}
+                      onChange={() => setDecorationPresetKey(option.value)}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+
+              <p>エフェクト</p>
+              <div className={styles.actions}>
+                {IMAGE_EFFECT_OPTIONS.map((option) => (
+                  <label key={option.value}>
+                    <input
+                      type="radio"
+                      name="imageEffect"
+                      value={option.value}
+                      checked={imageEffectKey === option.value}
+                      onChange={() => setImageEffectKey(option.value)}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className={styles.actions}>
             <button type="button" onClick={() => geolocation.start()}>
@@ -413,6 +498,8 @@ export function ArNewView() {
                 onCanvasReady={(canvas) => {
                   arCanvasRef.current = canvas;
                 }}
+                decorationPresetKey={decorationPresetKey}
+                imageEffectKey={imageEffectKey}
               />
 
               {arSubMode === "fine-tune" && (
