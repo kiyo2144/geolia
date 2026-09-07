@@ -39,6 +39,12 @@ function buildLabelTexture(label, distanceMeters) {
   return texture;
 }
 
+// 板の実寸を固定にすると、遠い配置ほど画面上で小さくなり視認できなくなる。
+// 一定距離（REFERENCE_DISTANCE_METERS）を超えたら距離に比例して拡大し、
+// 画面上でのおおよその見かけの大きさを保つ（近距離では実寸のまま）。
+const BASE_SCALE = [1.6, 0.5];
+const REFERENCE_DISTANCE_METERS = 12;
+
 /**
  * 「簡易表示」用のマーカー。実データは読み込まず、アイコン＋名前＋距離のラベルを
  * three.jsのSprite（常にカメラの方を向く板）として表示する。
@@ -50,8 +56,10 @@ export function PlacementLabelSprite({ label, distanceMeters }) {
     [label, roundedDistance],
   );
 
+  const scaleFactor = Math.max(1, distanceMeters / REFERENCE_DISTANCE_METERS);
+
   return (
-    <sprite scale={[1.6, 0.5, 1]}>
+    <sprite scale={[BASE_SCALE[0] * scaleFactor, BASE_SCALE[1] * scaleFactor, 1]}>
       <spriteMaterial map={texture} depthWrite={false} transparent />
     </sprite>
   );
