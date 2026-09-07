@@ -27,6 +27,9 @@ const DETAIL_LIMIT = 8; // 段階2: 詳細表示する最大件数
 // 視野内へ入る角度より出る角度を広めに取るヒステリシスを設ける。
 const VIEW_ENTER_ANGLE_DEGREES = 55; // 簡易→詳細表示へ切り替わる角度のしきい値
 const VIEW_EXIT_ANGLE_DEGREES = 75; // 詳細→簡易表示へ切り替わる角度のしきい値（入るときより広い）
+// 至近距離では、カメラの向きが多少ずれていても実物として見えることが多いため、
+// 角度によらず詳細表示の対象にする（要望により追加）。
+const NEAR_DISTANCE_METERS = 30;
 
 export function ArViewView() {
   const supabase = useMemo(() => createClient(), []);
@@ -134,7 +137,8 @@ export function ArViewView() {
     const next = new Set();
     for (const placement of placementsRaw) {
       const wasSticky = previous.has(placement.id);
-      const shouldEnter = placement.angleDiff <= VIEW_ENTER_ANGLE_DEGREES;
+      const isNear = placement.distance_meters <= NEAR_DISTANCE_METERS;
+      const shouldEnter = isNear || placement.angleDiff <= VIEW_ENTER_ANGLE_DEGREES;
       const shouldStay = wasSticky && placement.angleDiff <= VIEW_EXIT_ANGLE_DEGREES;
       if (shouldEnter || shouldStay) next.add(placement.id);
     }
