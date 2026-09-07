@@ -228,7 +228,7 @@ export default function MapView() {
   const [basemap, setBasemap] = useState("osm");
   const [forestVisible, setForestVisible] = useState(true);
   const [landVisible, setLandVisible] = useState(false);
-  const [buildingsVisible, setBuildingsVisible] = useState(false);
+  const [buildingsVisible, setBuildingsVisible] = useState(true);
   const [landColorMode, setLandColorMode] = useState("koaza");
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [status, setStatus] = useState("");
