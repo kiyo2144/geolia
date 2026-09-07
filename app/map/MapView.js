@@ -232,6 +232,19 @@ export default function MapView() {
   const locationPositionRef = useRef(null);
   const updateLocationMarkerRef = useRef(() => {});
 
+  const [exportRangeMode, setExportRangeMode] = useState("current");
+  const [exportBbox, setExportBbox] = useState(null);
+  const [isSelectingRectangle, setIsSelectingRectangle] = useState(false);
+  const [exportIncludeTerrain, setExportIncludeTerrain] = useState(true);
+  const [exportIncludeParcels, setExportIncludeParcels] = useState(true);
+  const [exportIncludeBasemapTexture, setExportIncludeBasemapTexture] = useState(true);
+  const [exportStatus, setExportStatus] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const selectionModeRef = useRef(isSelectingRectangle);
+  useEffect(() => {
+    selectionModeRef.current = isSelectingRectangle;
+  }, [isSelectingRectangle]);
+
   const latestFlagsRef = useRef({ forestVisible, landVisible });
   useEffect(() => {
     latestFlagsRef.current = { forestVisible, landVisible };
@@ -342,6 +355,62 @@ export default function MapView() {
     );
   }, [applyLocationPosition, handleLocationError]);
 
+  // マップのエクスポート（GLB）。three.jsは重いためエクスポート実行時にのみ動的読み込みする。
+  const handleExport = useCallback(async () => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!exportIncludeTerrain && !exportIncludeParcels) {
+      setExportStatus("「地形」「森林簿・地籍の押し出しメッシュ」のいずれかを選択してください");
+      return;
+    }
+
+    let bbox;
+    if (exportRangeMode === "rectangle") {
+      if (!exportBbox) {
+        setExportStatus("先に地図上で範囲を選択してください");
+        return;
+      }
+      bbox = exportBbox;
+    } else {
+      const bounds = map.getBounds();
+      bbox = {
+        minLng: bounds.getWest(),
+        minLat: bounds.getSouth(),
+        maxLng: bounds.getEast(),
+        maxLat: bounds.getNorth(),
+      };
+    }
+
+    setIsExporting(true);
+    try {
+      const { exportMapAsGlb, downloadGlb } = await import("./exportGlb");
+      const arrayBuffer = await exportMapAsGlb({
+        bbox,
+        includeTerrain: exportIncludeTerrain,
+        includeParcels: exportIncludeParcels,
+        includeBasemapTexture: exportIncludeTerrain && exportIncludeBasemapTexture,
+        basemapKey: basemap,
+        supabase: supabaseRef.current,
+        onProgress: setExportStatus,
+      });
+      downloadGlb(arrayBuffer, `geolia_map_${Date.now()}.glb`);
+      setExportStatus("エクスポートが完了しました");
+    } catch (error) {
+      console.error("マップのエクスポートに失敗しました:", error);
+      setExportStatus("エクスポートに失敗しました");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [
+    exportRangeMode,
+    exportBbox,
+    exportIncludeTerrain,
+    exportIncludeParcels,
+    exportIncludeBasemapTexture,
+    basemap,
+  ]);
+
   // 地図の初期化（マウント時に一度だけ）
   useEffect(() => {
     const map = new MapLibreMap({
@@ -372,6 +441,9 @@ export default function MapView() {
     );
     map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
 
+    // マップエクスポート機能の「矩形選択」用オーバーレイのソースID
+    const selectionRectSourceId = "selection-rect";
+
     // 'load' や 'styledata' 単体では、環境によって発火するタイミングが不安定
     // （発火が遅い・まれに拾えないことがある）ため、複数の手段を併用して
     // 確実にレイヤーを追加できるようにする。ガード（!map.getSource）により
@@ -385,6 +457,19 @@ export default function MapView() {
       } catch (error) {
         console.error("地形設定の初期化に失敗しました:", error);
       }
+      map.addSource(selectionRectSourceId, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+      map.addLayer({
+        id: "selection-rect-fill",
+        type: "fill",
+        source: selectionRectSourceId,
+        paint: { "fill-color": "#1e88e5", "fill-opacity": 0.15 },
+      });
+      map.addLayer({
+        id: "selection-rect-line",
+        type: "line",
+        source: selectionRectSourceId,
+        paint: { "line-color": "#1e88e5", "line-width": 2 },
+      });
       refreshData();
     };
 
@@ -460,12 +545,66 @@ export default function MapView() {
       locationPopup.setLngLat([pos.lng, pos.lat]).setHTML(html).addTo(map);
     });
 
+    // マップエクスポート機能の「矩形選択」用オーバーレイ。
+    // ドラッグ中の矩形をGeoJSONで描画し、mouseup時に確定したbboxをstateへ反映する。
+    // ソース・レイヤーの追加自体はスタイル読み込み完了後まで待つ必要があるため、
+    // tryInitLayers（森林簿・地籍・地形と同じ、確実に一度だけ実行される初期化処理）に含める。
+    let selectionStart = null;
+    const updateSelectionRect = (start, end) => {
+      const minLng = Math.min(start.lng, end.lng);
+      const maxLng = Math.max(start.lng, end.lng);
+      const minLat = Math.min(start.lat, end.lat);
+      const maxLat = Math.max(start.lat, end.lat);
+      const coords = [
+        [minLng, minLat],
+        [maxLng, minLat],
+        [maxLng, maxLat],
+        [minLng, maxLat],
+        [minLng, minLat],
+      ];
+      map.getSource(selectionRectSourceId)?.setData({
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords] } },
+        ],
+      });
+      return { minLng, minLat, maxLng, maxLat };
+    };
+    const handleSelectionMouseMove = (event) => {
+      if (!selectionStart) return;
+      updateSelectionRect(selectionStart, event.lngLat);
+    };
+    const handleSelectionMouseUp = (event) => {
+      if (!selectionStart) return;
+      const bbox = updateSelectionRect(selectionStart, event.lngLat);
+      selectionStart = null;
+      map.off("mousemove", handleSelectionMouseMove);
+      map.off("mouseup", handleSelectionMouseUp);
+      map.dragPan.enable();
+      map.dragRotate.enable();
+      setExportBbox(bbox);
+      setIsSelectingRectangle(false);
+    };
+    const handleSelectionMouseDown = (event) => {
+      if (!selectionModeRef.current) return;
+      event.preventDefault();
+      selectionStart = event.lngLat;
+      map.dragPan.disable();
+      map.dragRotate.disable();
+      map.on("mousemove", handleSelectionMouseMove);
+      map.on("mouseup", handleSelectionMouseUp);
+    };
+    map.on("mousedown", handleSelectionMouseDown);
+
     return () => {
       clearTimeout(debounceTimer);
       clearInterval(initPollTimer);
       clearTimeout(initPollTimeout);
       map.off("move", updateLocationMarkerElement);
       map.off("render", updateLocationMarkerElement);
+      map.off("mousedown", handleSelectionMouseDown);
+      map.off("mousemove", handleSelectionMouseMove);
+      map.off("mouseup", handleSelectionMouseUp);
       locationMarkerEl.remove();
       locationMarkerElRef.current = null;
       map.remove();
@@ -569,6 +708,13 @@ export default function MapView() {
     };
   }, [locationEnabled, applyLocationPosition, handleLocationError]);
 
+  // 範囲選択（矩形）モード中はカーソルをcrosshairにして分かりやすくする
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.getCanvas().style.cursor = isSelectingRectangle ? "crosshair" : "";
+  }, [isSelectingRectangle]);
+
   return (
     <div className={styles.wrapper}>
       <aside className={styles.sidePane}>
@@ -657,6 +803,80 @@ export default function MapView() {
               標高データはズームレベル12以上でのみ表示されます
             </p>
           )}
+        </section>
+
+        <section className={styles.section}>
+          <h2>マップのエクスポート（GLB）</h2>
+          <label>
+            <input
+              type="radio"
+              name="exportRangeMode"
+              checked={exportRangeMode === "current"}
+              onChange={() => setExportRangeMode("current")}
+            />
+            現在の表示範囲
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="exportRangeMode"
+              checked={exportRangeMode === "rectangle"}
+              onChange={() => setExportRangeMode("rectangle")}
+            />
+            矩形選択
+          </label>
+          {exportRangeMode === "rectangle" && (
+            <>
+              <button
+                type="button"
+                className={styles.locateButton}
+                onClick={() => setIsSelectingRectangle(true)}
+                disabled={isSelectingRectangle}
+              >
+                {isSelectingRectangle ? "地図をドラッグして範囲を指定..." : "範囲を選択"}
+              </button>
+              {exportBbox && !isSelectingRectangle && (
+                <p className={styles.status}>範囲を選択済みです</p>
+              )}
+            </>
+          )}
+
+          <label>
+            <input
+              type="checkbox"
+              checked={exportIncludeTerrain}
+              onChange={(event) => setExportIncludeTerrain(event.target.checked)}
+            />
+            地形（標高メッシュ）
+          </label>
+          {exportIncludeTerrain && (
+            <label className={styles.subOption}>
+              <input
+                type="checkbox"
+                checked={exportIncludeBasemapTexture}
+                onChange={(event) => setExportIncludeBasemapTexture(event.target.checked)}
+              />
+              背景地図をテクスチャとして貼り付ける
+            </label>
+          )}
+          <label>
+            <input
+              type="checkbox"
+              checked={exportIncludeParcels}
+              onChange={(event) => setExportIncludeParcels(event.target.checked)}
+            />
+            森林簿・地籍の押し出しメッシュ
+          </label>
+
+          <button
+            type="button"
+            className={styles.locateButton}
+            onClick={handleExport}
+            disabled={isExporting}
+          >
+            {isExporting ? "エクスポート中..." : "GLBをエクスポート"}
+          </button>
+          {exportStatus && <p className={styles.status}>{exportStatus}</p>}
         </section>
 
         {status && <p className={styles.status}>{status}</p>}

@@ -48,6 +48,10 @@
   color: var(--foreground);
 }
 
+.subOption {
+  margin-left: 20px;
+}
+
 .locateButton {
   align-self: flex-start;
   font-size: 13px;
