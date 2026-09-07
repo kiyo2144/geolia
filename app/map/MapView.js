@@ -77,6 +77,9 @@ const LOCATION_MARKER_COLOR = "#e63946";
 // AR配置ピンの色。現在地マーカーと区別できるよう別の色にする。
 const AR_PLACEMENT_MARKER_COLOR = "#8e44ad";
 
+// OSM建物データの色（実測の高さが無いものが大半のため、単色の落ち着いた色にする）
+const BUILDING_COLOR = "#c9b8a3";
+
 function baseStyle(kind) {
   const tile = BASEMAP_TILES[kind];
   return {
@@ -100,13 +103,16 @@ function baseStyle(kind) {
 // 描画の準備ができてから表示を瞬時に入れ替える（表示側は常にどちらか一方のみ）。
 const BUFFER_LAYER_CONFIG = {
   forest: {
-    color: ["get", "color"],
+    colorExpr: () => ["get", "color"],
   },
   land: {
-    color: (landColorMode) => [
+    colorExpr: (landColorMode) => [
       "get",
       landColorMode === "koaza" ? "color_koaza" : "color_seido",
     ],
+  },
+  buildings: {
+    colorExpr: () => BUILDING_COLOR,
   },
 };
 
@@ -124,10 +130,7 @@ function addDataLayers(map, landColorMode) {
         source: sourceId,
         layout: { visibility: buffer === "a" ? "visible" : "none" },
         paint: {
-          "fill-extrusion-color":
-            key === "land"
-              ? BUFFER_LAYER_CONFIG.land.color(landColorMode)
-              : BUFFER_LAYER_CONFIG.forest.color,
+          "fill-extrusion-color": BUFFER_LAYER_CONFIG[key].colorExpr(landColorMode),
           "fill-extrusion-height": ["get", "height"],
           "fill-extrusion-opacity": 0.85,
         },
@@ -225,6 +228,7 @@ export default function MapView() {
   const [basemap, setBasemap] = useState("osm");
   const [forestVisible, setForestVisible] = useState(true);
   const [landVisible, setLandVisible] = useState(false);
+  const [buildingsVisible, setBuildingsVisible] = useState(false);
   const [landColorMode, setLandColorMode] = useState("koaza");
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [status, setStatus] = useState("");
@@ -263,10 +267,10 @@ export default function MapView() {
     selectionModeRef.current = isSelectingRectangle;
   }, [isSelectingRectangle]);
 
-  const latestFlagsRef = useRef({ forestVisible, landVisible });
+  const latestFlagsRef = useRef({ forestVisible, landVisible, buildingsVisible });
   useEffect(() => {
-    latestFlagsRef.current = { forestVisible, landVisible };
-  }, [forestVisible, landVisible]);
+    latestFlagsRef.current = { forestVisible, landVisible, buildingsVisible };
+  }, [forestVisible, landVisible, buildingsVisible]);
 
   const terrainEnabledRef = useRef(terrainEnabled);
   useEffect(() => {
@@ -276,6 +280,7 @@ export default function MapView() {
   // 現在どちらのバッファ(a/b)が表示側になっているかを記録する
   const forestBufferRef = useRef("a");
   const landBufferRef = useRef("a");
+  const buildingsBufferRef = useRef("a");
 
   const refreshData = useCallback(async () => {
     const map = mapRef.current;
@@ -295,8 +300,11 @@ export default function MapView() {
       max_lng: bounds.getEast(),
       max_lat: bounds.getNorth(),
     };
-    const { forestVisible: showForest, landVisible: showLand } =
-      latestFlagsRef.current;
+    const {
+      forestVisible: showForest,
+      landVisible: showLand,
+      buildingsVisible: showBuildings,
+    } = latestFlagsRef.current;
 
     setStatus("読み込み中...");
     const supabase = supabaseRef.current;
@@ -319,6 +327,15 @@ export default function MapView() {
       );
     } else {
       clearBufferData(map, "land", landBufferRef);
+    }
+    if (showBuildings) {
+      tasks.push(
+        supabase.rpc("osm_buildings_in_bbox", bbox).then(({ data, error }) => {
+          if (!error && data) swapBufferData(map, "buildings", buildingsBufferRef, data);
+        }),
+      );
+    } else {
+      clearBufferData(map, "buildings", buildingsBufferRef);
     }
     await Promise.all(tasks);
     setStatus("");
@@ -588,6 +605,8 @@ export default function MapView() {
         "forest-fill-b",
         "land-fill-a",
         "land-fill-b",
+        "buildings-fill-a",
+        "buildings-fill-b",
       ].filter((id) => map.getLayer(id));
       if (!layerIds.length) return;
       const features = map.queryRenderedFeatures(event.point, {
@@ -600,6 +619,15 @@ export default function MapView() {
       if (feature.layer.id.startsWith("forest-fill")) {
         const p = feature.properties;
         html = `<b>森林簿</b><br>林班 ${p.rinhan ?? "-"}　小班 ${p.shohan ?? "-"}<br>施業番 ${p.sehyoban ?? "-"}`;
+      } else if (feature.layer.id.startsWith("buildings-fill")) {
+        const p = feature.properties;
+        const heightText =
+          p.height_source === "tag"
+            ? `${p.height}m`
+            : p.height_source === "levels"
+              ? `約${p.height}m（階数から推定）`
+              : `約${p.height}m（推定値）`;
+        html = `<b>${p.name ?? "建物"}</b><br>高さ ${heightText}<br><span style="font-size:11px;color:#888;">出典: OpenStreetMap</span>`;
       } else {
         const p = feature.properties;
         html = `<b>地籍筆</b><br>小字 ${p.koaza_name ?? "-"}　地番 ${p.chiban ?? "-"}<br>精度区分 ${p.precision_class ?? "-"}`;
@@ -768,7 +796,7 @@ export default function MapView() {
   // レイヤー表示のオン/オフ
   useEffect(() => {
     refreshData();
-  }, [forestVisible, landVisible, refreshData]);
+  }, [forestVisible, landVisible, buildingsVisible, refreshData]);
 
   // AR配置ピンの表示オン/オフ
   useEffect(() => {
@@ -901,6 +929,14 @@ export default function MapView() {
               onChange={(event) => setArPlacementsVisible(event.target.checked)}
             />
             AR配置
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={buildingsVisible}
+              onChange={(event) => setBuildingsVisible(event.target.checked)}
+            />
+            OSM建物
           </label>
         </section>
 
@@ -1053,6 +1089,13 @@ export default function MapView() {
             地理院タイル
           </a>
           の標高タイルを加工して利用しています。
+          {buildingsVisible && (
+            <>
+              建物データは
+              <span dangerouslySetInnerHTML={{ __html: OSM_ATTRIBUTION }} />
+              を加工して利用しています。
+            </>
+          )}
         </p>
       </aside>
 
