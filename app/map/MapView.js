@@ -33,8 +33,19 @@ const GSI_ATTRIBUTION =
 const DEM_TILE_URL = "/api/dem-tile/{z}/{x}/{y}.png";
 
 const MIN_ZOOM_FOR_DATA = 13;
-const INITIAL_CENTER = [141.1, 38.99];
-const INITIAL_ZOOM = 12.5;
+
+// 平泉町の森林簿・地籍データの実際の範囲（南西・北東の緯度経度）。
+// forest_parcels / land_parcels 全件のジオメトリから算出した実測値。
+const HIRAIZUMI_DATA_BOUNDS = [
+  [141.0063447050003, 38.949578826], // 南西
+  [141.1919757, 39.028813277000005], // 北東
+];
+
+// パン（地図の移動）を許可する範囲。データ範囲より少し広めに余裕を持たせる。
+const HIRAIZUMI_MAX_BOUNDS = [
+  [140.95, 38.92], // 南西
+  [141.25, 39.06], // 北東
+];
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 
@@ -198,12 +209,19 @@ export default function MapView() {
     const map = new MapLibreMap({
       container: mapContainerRef.current,
       style: baseStyle("pale"),
-      center: INITIAL_CENTER,
-      zoom: INITIAL_ZOOM,
+      bounds: HIRAIZUMI_DATA_BOUNDS,
+      fitBoundsOptions: { padding: 40 },
+      maxBounds: HIRAIZUMI_MAX_BOUNDS,
       pitch: 50,
       bearing: -10,
       maxPitch: 75,
     });
+    // 画面サイズによっては「町全体を映す」ためのズームが森林簿・地籍データの
+    // 表示しきい値(MIN_ZOOM_FOR_DATA)を下回ることがある。その場合はデータが
+    // 最初から見えることを優先し、しきい値まで寄せる（中心はfitBoundsの結果のまま）。
+    if (map.getZoom() < MIN_ZOOM_FOR_DATA) {
+      map.setZoom(MIN_ZOOM_FOR_DATA);
+    }
     mapRef.current = map;
     if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
       window.__geoliaMap = map;
