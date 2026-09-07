@@ -74,6 +74,9 @@ const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 // 3D立体物（fill-extrusion）ではなくDOM要素のアイコン（常にカメラ正面を向く）で表示する。
 const LOCATION_MARKER_COLOR = "#e63946";
 
+// AR配置ピンの色。現在地マーカーと区別できるよう別の色にする。
+const AR_PLACEMENT_MARKER_COLOR = "#8e44ad";
+
 function baseStyle(kind) {
   const tile = BASEMAP_TILES[kind];
   return {
@@ -178,10 +181,10 @@ function clearBufferData(map, key, bufferRef) {
   map.getSource(`${key}-${otherBuffer}`)?.setData(EMPTY_FEATURE_COLLECTION);
 }
 
-// 現在地を示すピン型アイコンのDOM要素を作成する。
+// ピン型アイコンのDOM要素を作成する。現在地マーカー・AR配置ピンで共用する。
 // マーカーはこの要素をmaplibre-glのレイヤーではなく地図のキャンバスコンテナに直接重ねて
 // 表示するため、地図を回転・傾けても常にカメラ正面を向いた同じ見た目になる。
-function createLocationMarkerElement() {
+function createPinMarkerElement(color) {
   const el = document.createElement("div");
   el.style.position = "absolute";
   el.style.top = "0";
@@ -195,7 +198,7 @@ function createLocationMarkerElement() {
   el.style.display = "none";
   el.innerHTML =
     '<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">' +
-    `<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" fill="${LOCATION_MARKER_COLOR}" stroke="#ffffff" stroke-width="1.5"/>` +
+    `<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>` +
     '<circle cx="14" cy="12" r="4.2" fill="#ffffff"/>' +
     "</svg>";
   return el;
@@ -231,6 +234,16 @@ export default function MapView() {
   const locationMarkerElRef = useRef(null);
   const locationPositionRef = useRef(null);
   const updateLocationMarkerRef = useRef(() => {});
+
+  const [arPlacementsVisible, setArPlacementsVisible] = useState(true);
+  const arPlacementsVisibleRef = useRef(arPlacementsVisible);
+  useEffect(() => {
+    arPlacementsVisibleRef.current = arPlacementsVisible;
+  }, [arPlacementsVisible]);
+  // key: ar_placements.id, value: { el, lng, lat, altitude, properties }
+  const arPlacementMarkersRef = useRef(new Map());
+  const updateArPlacementMarkersRef = useRef(() => {});
+  const arPlacementPopupRef = useRef(null);
 
   const [exportRangeMode, setExportRangeMode] = useState("current");
   const [exportBbox, setExportBbox] = useState(null);
@@ -304,6 +317,74 @@ export default function MapView() {
     }
     await Promise.all(tasks);
     setStatus("");
+  }, []);
+
+  // AR配置（ar_placements）を表示範囲内で取得し、ピン(DOM要素)として表示する。
+  // 森林簿・地籍と同様に表示範囲(bbox)内のみを取得する。
+  const refreshArPlacements = useCallback(async () => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const markers = arPlacementMarkersRef.current;
+
+    if (!arPlacementsVisibleRef.current) {
+      for (const marker of markers.values()) marker.el.remove();
+      markers.clear();
+      updateArPlacementMarkersRef.current();
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const { data, error } = await supabaseRef.current.rpc("ar_placements_in_bbox", {
+      min_lng: bounds.getWest(),
+      min_lat: bounds.getSouth(),
+      max_lng: bounds.getEast(),
+      max_lat: bounds.getNorth(),
+    });
+    if (error || !data) return;
+
+    const seenIds = new Set();
+    for (const feature of data.features) {
+      const { id, lat, lng, altitude } = feature.properties;
+      seenIds.add(id);
+
+      const existing = markers.get(id);
+      if (existing) {
+        existing.lat = lat;
+        existing.lng = lng;
+        existing.altitude = altitude;
+        existing.properties = feature.properties;
+        continue;
+      }
+
+      const el = createPinMarkerElement(AR_PLACEMENT_MARKER_COLOR);
+      map.getCanvasContainer().appendChild(el);
+      el.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const marker = arPlacementMarkersRef.current.get(id);
+        if (!marker) return;
+        const p = marker.properties;
+        const altitudeText =
+          p.altitude === null || p.altitude === undefined
+            ? "高度情報なし"
+            : `高度 約${Math.round(p.altitude)}m`;
+        const assetTypeLabel =
+          p.asset_type === "gaussian_splat" ? "Gaussian Splat" : "点群";
+        const html = `<b>${p.label ?? "AR配置"}</b><br>種別 ${assetTypeLabel}（${p.format}）<br>緯度 ${Number(p.lat).toFixed(6)}　経度 ${Number(p.lng).toFixed(6)}<br>${altitudeText}`;
+        arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).setHTML(html).addTo(map);
+      });
+
+      markers.set(id, { el, lat, lng, altitude, properties: feature.properties });
+    }
+
+    for (const [id, marker] of markers) {
+      if (!seenIds.has(id)) {
+        marker.el.remove();
+        markers.delete(id);
+      }
+    }
+
+    updateArPlacementMarkersRef.current();
   }, []);
 
   // 取得した位置情報（GeolocationCoordinates）をマーカー・ステータス表示に反映する。
@@ -471,6 +552,7 @@ export default function MapView() {
         paint: { "line-color": "#1e88e5", "line-width": 2 },
       });
       refreshData();
+      refreshArPlacements();
     };
 
     map.on("load", tryInitLayers);
@@ -482,7 +564,10 @@ export default function MapView() {
     let debounceTimer;
     map.on("moveend", () => {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(refreshData, 300);
+      debounceTimer = setTimeout(() => {
+        refreshData();
+        refreshArPlacements();
+      }, 300);
     });
 
     const popup = new Popup({ closeButton: true, closeOnClick: true });
@@ -514,7 +599,7 @@ export default function MapView() {
     // 現在地マーカー（DOM要素）。地形の起伏やズーム・傾きが変わるたびに
     // 位置を再計算する必要があるため、レイヤーではなくキャンバスコンテナに
     // 直接重ねて、地図の描画イベントに合わせて自前で位置を更新する。
-    const locationMarkerEl = createLocationMarkerElement();
+    const locationMarkerEl = createPinMarkerElement(LOCATION_MARKER_COLOR);
     map.getCanvasContainer().appendChild(locationMarkerEl);
     locationMarkerElRef.current = locationMarkerEl;
 
@@ -533,6 +618,27 @@ export default function MapView() {
     updateLocationMarkerRef.current = updateLocationMarkerElement;
     map.on("move", updateLocationMarkerElement);
     map.on("render", updateLocationMarkerElement);
+
+    // AR配置ピン（DOM要素）。現在地マーカーと同様に、地図の描画イベントに合わせて
+    // 位置（3次元位置。高度が無い場合は地表面）を自前で更新する。
+    // クリーンアップ時にrefの最新値ではなくマウント時点のMapを確実に片付けられるよう、
+    // ローカル変数として捕捉しておく。
+    const arPlacementMarkers = arPlacementMarkersRef.current;
+    arPlacementPopupRef.current = new Popup({ closeButton: true, closeOnClick: true });
+    const updateArPlacementMarkers = () => {
+      for (const marker of arPlacementMarkers.values()) {
+        const elevation =
+          marker.altitude !== null && marker.altitude !== undefined
+            ? marker.altitude
+            : map.queryTerrainElevation([marker.lng, marker.lat]) ?? 0;
+        const point = projectAtElevation(map, marker.lng, marker.lat, elevation);
+        marker.el.style.display = "";
+        marker.el.style.transform = `translate(${point.x}px, ${point.y}px)`;
+      }
+    };
+    updateArPlacementMarkersRef.current = updateArPlacementMarkers;
+    map.on("move", updateArPlacementMarkers);
+    map.on("render", updateArPlacementMarkers);
 
     const locationPopup = new Popup({ closeButton: true, closeOnClick: true });
     locationMarkerEl.addEventListener("click", (event) => {
@@ -602,11 +708,15 @@ export default function MapView() {
       clearTimeout(initPollTimeout);
       map.off("move", updateLocationMarkerElement);
       map.off("render", updateLocationMarkerElement);
+      map.off("move", updateArPlacementMarkers);
+      map.off("render", updateArPlacementMarkers);
       map.off("mousedown", handleSelectionMouseDown);
       map.off("mousemove", handleSelectionMouseMove);
       map.off("mouseup", handleSelectionMouseUp);
       locationMarkerEl.remove();
       locationMarkerElRef.current = null;
+      for (const marker of arPlacementMarkers.values()) marker.el.remove();
+      arPlacementMarkers.clear();
       map.remove();
       mapRef.current = null;
     };
@@ -648,6 +758,11 @@ export default function MapView() {
   useEffect(() => {
     refreshData();
   }, [forestVisible, landVisible, refreshData]);
+
+  // AR配置ピンの表示オン/オフ
+  useEffect(() => {
+    refreshArPlacements();
+  }, [arPlacementsVisible, refreshArPlacements]);
 
   // 筆レイヤーの色分けモード（表示・非表示どちらのバッファにも適用しておく）
   useEffect(() => {
@@ -748,6 +863,14 @@ export default function MapView() {
               onChange={(event) => setLandVisible(event.target.checked)}
             />
             地籍 筆
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={arPlacementsVisible}
+              onChange={(event) => setArPlacementsVisible(event.target.checked)}
+            />
+            AR配置
           </label>
         </section>
 
