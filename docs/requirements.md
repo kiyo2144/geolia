@@ -328,6 +328,8 @@
 
 ### 6.2 テーブル定義（案）
 
+実際のSQLマイグレーションとして `supabase/migrations/` に用意済み（`20260907120000_initial_schema.sql`、`20260907120100_storage_buckets.sql`）。以下は設計の要約。
+
 ```sql
 -- 管理者フラグ（フェーズ①から使用。フェーズ②・③でも同じ仕組みを引き継ぐ）
 create table public.profiles (
