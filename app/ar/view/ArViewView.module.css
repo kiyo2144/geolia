@@ -1,0 +1,58 @@
+.wrapper {
+  position: relative;
+  flex: 1;
+  min-height: calc(100dvh - 65px);
+  overflow: hidden;
+  background: #0d1117;
+  color: #f0f3f7;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.panelOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+  padding: 1.5rem;
+  background: rgba(13, 17, 23, 0.92);
+}
+
+.panelOverlay button {
+  padding: 0.7rem 1.2rem;
+  border-radius: 8px;
+  border: none;
+  background: #238636;
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.error {
+  font-size: 0.85rem;
+  color: #f85149;
+}
+
+.statusBar {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.status {
+  font-size: 0.75rem;
+  color: #c9d1d9;
+  background: rgba(13, 17, 23, 0.7);
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+}

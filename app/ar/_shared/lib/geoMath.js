@@ -67,3 +67,9 @@ export function bearingDegrees(origin, target) {
 
   return (bearing + 360) % 360;
 }
+
+/** 2つの方位角(度)の差の絶対値（0〜180度）。表現レンジ(0-360等)が違っても正しく比較できる。 */
+export function circularDiffDegrees(a, b) {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}

@@ -1,54 +1,17 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { computeCameraQuaternion } from "../lib/deviceOrientationQuaternion";
 import { latLngToLocalMeters } from "../lib/geoMath";
 import { DemoPointCloud } from "./DemoPointCloud";
+import { OrientedCamera } from "./OrientedCamera";
 import { PointCloudObject } from "./PointCloudObject";
+import { SparkSetup } from "./SparkSetup";
 import { SplatObject } from "./SplatObject";
 
 // 「狙い撃ち」配置モードで、3Dデータをカメラの正面何メートル先に表示するか
 const AIM_DISTANCE_METERS = 2.2;
-
-/** 端末の向き(orientation)を毎フレーム three.js カメラへ反映する */
-function OrientedCamera({ orientation }) {
-  const { camera } = useThree();
-
-  useFrame(() => {
-    if (!orientation) return;
-    camera.quaternion.copy(computeCameraQuaternion(orientation));
-  });
-
-  return null;
-}
-
-/**
- * Gaussian Splat(.spz等)を描画するために必要なSparkRendererをシーンに登録する。
- * @sparkjsdev/spark はサイズが大きいため、実際にSplatを表示する時だけ動的importで読み込む。
- */
-function SparkSetup() {
-  const { gl } = useThree();
-  const [sparkRenderer, setSparkRenderer] = useState(null);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    import("@sparkjsdev/spark").then(({ SparkRenderer }) => {
-      if (isCancelled) return;
-      setSparkRenderer(new SparkRenderer({ renderer: gl }));
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [gl]);
-
-  if (!sparkRenderer) return null;
-
-  return <primitive object={sparkRenderer} />;
-}
 
 /**
  * 「配置した緯度経度」と「現在地」の差分から、3Dデータを現実の位置に
