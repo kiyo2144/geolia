@@ -401,7 +401,8 @@ create index forest_parcels_geom_idx on public.forest_parcels using gist (geom);
 
 -- 地籍筆（サンプルデータ、読み取り専用）
 create table public.land_parcels (
-  id text primary key,        -- 元データのID（例: H000000609）
+  id uuid primary key default gen_random_uuid(),
+  source_id text,              -- 元データのID（例: H000000609）。1つの地番が複数ポリゴンに分かれるため一意ではない
   city_code text,              -- 市区町村コード
   oaza_code text,
   chome_code text,
