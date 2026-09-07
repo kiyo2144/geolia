@@ -6,6 +6,10 @@
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 
+// OSM建物の色分け（app/map/MapView.js の BUILDING_COLOR / NAMED_BUILDING_COLOR と揃えること）
+const BUILDING_COLOR = "#c9b8a3";
+const NAMED_BUILDING_COLOR = "#e0a526";
+
 const DEM_TILE_ZOOM = 14; // 標高タイルの取得ズーム（GSI標高タイルの提供上限に合わせる）
 const BASEMAP_TILE_ZOOM = 17; // 背景地図テクスチャの取得ズーム
 const TERRAIN_GRID_SIZE = 64; // 地形メッシュの分割数（1辺あたりの区画数）
@@ -291,6 +295,7 @@ export async function exportMapAsGlb({
   bbox,
   includeTerrain,
   includeParcels,
+  includeBuildings,
   includeBasemapTexture,
   basemapKey,
   supabase,
@@ -350,6 +355,37 @@ export async function exportMapAsGlb({
           "land_parcels",
           landData.features,
           "color_koaza",
+          project,
+          sampleElevation,
+          minElevation,
+        ),
+      );
+    }
+  }
+
+  if (includeBuildings) {
+    onProgress?.("OSM建物データを取得中...");
+    const bboxParam = {
+      min_lng: bbox.minLng,
+      min_lat: bbox.minLat,
+      max_lng: bbox.maxLng,
+      max_lat: bbox.maxLat,
+    };
+    const { data: buildingsData } = await supabase.rpc("osm_buildings_in_bbox", bboxParam);
+
+    onProgress?.("建物メッシュを生成中...");
+    if (buildingsData?.features?.length) {
+      // /map画面と同じ色分け（名称のある建物＝注目スポットは別色）をエクスポートにも反映する
+      for (const feature of buildingsData.features) {
+        feature.properties.color = feature.properties.name
+          ? NAMED_BUILDING_COLOR
+          : BUILDING_COLOR;
+      }
+      scene.add(
+        buildParcelGroup(
+          "osm_buildings",
+          buildingsData.features,
+          "color",
           project,
           sampleElevation,
           minElevation,

@@ -267,6 +267,7 @@ export default function MapView() {
   const [isSelectingRectangle, setIsSelectingRectangle] = useState(false);
   const [exportIncludeTerrain, setExportIncludeTerrain] = useState(true);
   const [exportIncludeParcels, setExportIncludeParcels] = useState(true);
+  const [exportIncludeBuildings, setExportIncludeBuildings] = useState(false);
   const [exportIncludeBasemapTexture, setExportIncludeBasemapTexture] = useState(true);
   const [exportStatus, setExportStatus] = useState("");
   const [isExporting, setIsExporting] = useState(false);
@@ -477,8 +478,10 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map) return;
 
-    if (!exportIncludeTerrain && !exportIncludeParcels) {
-      setExportStatus("「地形」「森林簿・地籍の押し出しメッシュ」のいずれかを選択してください");
+    if (!exportIncludeTerrain && !exportIncludeParcels && !exportIncludeBuildings) {
+      setExportStatus(
+        "「地形」「森林簿・地籍の押し出しメッシュ」「OSM建物」のいずれかを選択してください",
+      );
       return;
     }
 
@@ -506,6 +509,7 @@ export default function MapView() {
         bbox,
         includeTerrain: exportIncludeTerrain,
         includeParcels: exportIncludeParcels,
+        includeBuildings: exportIncludeBuildings,
         includeBasemapTexture: exportIncludeTerrain && exportIncludeBasemapTexture,
         basemapKey: basemap,
         supabase: supabaseRef.current,
@@ -524,6 +528,7 @@ export default function MapView() {
     exportBbox,
     exportIncludeTerrain,
     exportIncludeParcels,
+    exportIncludeBuildings,
     exportIncludeBasemapTexture,
     basemap,
   ]);
@@ -1073,6 +1078,14 @@ export default function MapView() {
               onChange={(event) => setExportIncludeParcels(event.target.checked)}
             />
             森林簿・地籍の押し出しメッシュ
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={exportIncludeBuildings}
+              onChange={(event) => setExportIncludeBuildings(event.target.checked)}
+            />
+            OSM建物
           </label>
 
           <button
