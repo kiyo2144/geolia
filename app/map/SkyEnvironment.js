@@ -50,15 +50,17 @@ function angleToDirection(elevationDeg, azimuthDeg, radius) {
 export function getLightingConfig(timeOfDay, weatherType) {
   const dim = WEATHER_DIM[weatherType] ?? 1;
 
+  // 空は夜らしく暗く表現する一方、建物や地形（道路など）まで暗くすると
+  // 確認作業がしづらくなるため、地物のライティング自体は昼と同程度の明るさを保つ。
   if (timeOfDay === "night") {
     return {
-      ambient: { color: "#334066", intensity: 0.3 + 0.1 * dim },
+      ambient: { color: "#c9d6ff", intensity: 0.55 + 0.35 * dim },
       directional: {
-        color: "#7f94c9",
-        intensity: weatherType === "sunny" ? 0.3 : 0.1,
+        color: "#dbe4ff",
+        intensity: 0.4 + 1.1 * dim,
         position: angleToDirection(MOON_ANGLE.elevationDeg, MOON_ANGLE.azimuthDeg, 200),
       },
-      hemisphere: { sky: "#1b2447", ground: "#05060a", intensity: 0.35 },
+      hemisphere: { sky: "#8fa5d8", ground: "#4a4a3a", intensity: 0.3 + 0.4 * dim },
     };
   }
 
