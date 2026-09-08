@@ -56,6 +56,16 @@ const DEM_TILE_URL = "/api/dem-tile/{z}/{x}/{y}.png";
 
 const MIN_ZOOM_FOR_DATA = 13;
 
+// 起動時、現在地が取得できればその地点を中心にズームレベルこの値・上面（真上から
+// 見下ろす）表示にする。取得できない場合は町全体を見渡せる俯瞰表示にフォールバックする。
+const CURRENT_LOCATION_INITIAL_ZOOM = 17;
+const GEOLOCATION_INITIAL_TIMEOUT_MS = 4000;
+
+// 通常は右ドラッグ／Ctrl+ドラッグで地図の回転・傾きを操作するが、スクロールボタン
+// （ホイールクリック）を押しながらのドラッグでも同様に操作できるようにするための感度。
+const MIDDLE_BUTTON_ROTATE_SENSITIVITY = 0.3; // 1pxあたりの回転角度（度）
+const MIDDLE_BUTTON_PITCH_SENSITIVITY = 0.3; // 1pxあたりの傾き角度（度）
+
 // 平泉町の森林簿・地籍データの実際の範囲（南西・北東の緯度経度）。
 // forest_parcels / land_parcels 全件のジオメトリから算出した実測値。
 const HIRAIZUMI_DATA_BOUNDS = [
@@ -148,10 +158,10 @@ function addDataLayers(map, landColorMode) {
   }
 }
 
-// 標高タイルによる地形起伏（試験的機能）の有効/無効を切り替える。
+// 標高タイルによる地形起伏（試験的機能）の有効/無効・強調倍率を切り替える。
 // スタイル読み込み未完了時はエラーになるため、呼び出し側でtry/catchするか、
 // スタイル読み込み確認後（isStyleLoaded()）に呼び出すこと。
-function applyTerrain(map, enabled) {
+function applyTerrain(map, enabled, exaggeration) {
   if (enabled) {
     if (!map.getSource("terrain-dem")) {
       map.addSource("terrain-dem", {
@@ -163,11 +173,52 @@ function applyTerrain(map, enabled) {
         attribution: GSI_ATTRIBUTION,
       });
     }
-    map.setTerrain({ source: "terrain-dem", exaggeration: 1.5 });
+    map.setTerrain({ source: "terrain-dem", exaggeration });
   } else {
     map.setTerrain(null);
   }
 }
+
+// 起動時の初期カメラ位置を、現在地が取得できればその地点中心・上面表示で、
+// 取得できなければ（拒否・タイムアウト等）nullを返す（呼び出し側で町全体の俯瞰表示にフォールバックする）。
+function getInitialCameraFromLocation() {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const finish = (camera) => {
+      if (settled) return;
+      settled = true;
+      resolve(camera);
+    };
+    const timeoutId = setTimeout(() => finish(null), GEOLOCATION_INITIAL_TIMEOUT_MS);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        clearTimeout(timeoutId);
+        finish({
+          center: [position.coords.longitude, position.coords.latitude],
+          zoom: CURRENT_LOCATION_INITIAL_ZOOM,
+          pitch: 0,
+          bearing: 0,
+        });
+      },
+      () => {
+        clearTimeout(timeoutId);
+        finish(null);
+      },
+      { enableHighAccuracy: true, timeout: GEOLOCATION_INITIAL_TIMEOUT_MS, maximumAge: 60000 },
+    );
+  });
+}
+
+const FALLBACK_INITIAL_CAMERA = {
+  bounds: HIRAIZUMI_DATA_BOUNDS,
+  fitBoundsOptions: { padding: 40 },
+  pitch: 50,
+  bearing: -10,
+};
 
 // 非表示側のバッファに新データを流し込み、描画の準備ができてから表示を入れ替える。
 function swapBufferData(map, key, bufferRef, data) {
@@ -237,11 +288,16 @@ export default function MapView() {
   const [buildingsVisible, setBuildingsVisible] = useState(true);
   const [landColorMode, setLandColorMode] = useState("koaza");
   const [terrainEnabled, setTerrainEnabled] = useState(true);
+  const [terrainExaggeration, setTerrainExaggeration] = useState(1.5);
   const [status, setStatus] = useState("");
   // スマートフォン等の狭い画面ではサイドメニューが地図を覆ってしまうため、
   // 初期状態は画面幅に応じて開閉を決める（デスクトップ幅では常に開いた状態にする）。
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window === "undefined" ? true : window.innerWidth > 768,
+  );
+  // タッチ操作の端末では、地図操作の説明文をタッチジェスチャー向けの内容に切り替える
+  const [isTouchDevice] = useState(() =>
+    typeof window === "undefined" ? false : "ontouchstart" in window || navigator.maxTouchPoints > 0,
   );
   const [locationEnabled, setLocationEnabled] = useState(true);
   const [locationStatus, setLocationStatus] = useState("");
@@ -292,6 +348,11 @@ export default function MapView() {
   useEffect(() => {
     terrainEnabledRef.current = terrainEnabled;
   }, [terrainEnabled]);
+
+  const terrainExaggerationRef = useRef(terrainExaggeration);
+  useEffect(() => {
+    terrainExaggerationRef.current = terrainExaggeration;
+  }, [terrainExaggeration]);
 
   // 現在どちらのバッファ(a/b)が表示側になっているかを記録する
   const forestBufferRef = useRef("a");
@@ -542,21 +603,38 @@ export default function MapView() {
     supabase,
   ]);
 
-  // 地図の初期化（マウント時に一度だけ）
+  // 起動時、現在地が取得できるかどうかを先に判定しておく（現在地が取れればそこを
+  // 中心とした上面表示、取れなければ町全体の俯瞰表示にフォールバックする）。
+  // 地図本体の初期化はこの判定が終わるまで待つため、初期表示が後から現在地へ
+  // 飛ぶような見え方にはならない。
+  const [initialCameraReady, setInitialCameraReady] = useState(false);
+  const initialCameraRef = useRef(FALLBACK_INITIAL_CAMERA);
   useEffect(() => {
+    let cancelled = false;
+    getInitialCameraFromLocation().then((camera) => {
+      if (cancelled) return;
+      initialCameraRef.current = camera ?? FALLBACK_INITIAL_CAMERA;
+      setInitialCameraReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 地図の初期化（初期カメラ位置の判定が終わったあとに一度だけ）
+  useEffect(() => {
+    if (!initialCameraReady) return;
+
     const map = new MapLibreMap({
       container: mapContainerRef.current,
       style: baseStyle("osm"),
-      bounds: HIRAIZUMI_DATA_BOUNDS,
-      fitBoundsOptions: { padding: 40 },
       maxBounds: HIRAIZUMI_MAX_BOUNDS,
-      pitch: 50,
-      bearing: -10,
       maxPitch: 75,
+      ...initialCameraRef.current,
     });
     // 画面サイズによっては「町全体を映す」ためのズームが森林簿・地籍データの
     // 表示しきい値(MIN_ZOOM_FOR_DATA)を下回ることがある。その場合はデータが
-    // 最初から見えることを優先し、しきい値まで寄せる（中心はfitBoundsの結果のまま）。
+    // 最初から見えることを優先し、しきい値まで寄せる（中心はそのまま）。
     if (map.getZoom() < MIN_ZOOM_FOR_DATA) {
       map.setZoom(MIN_ZOOM_FOR_DATA);
     }
@@ -567,7 +645,7 @@ export default function MapView() {
     skipNextBasemapChangeRef.current = true;
 
     map.addControl(
-      new NavigationControl({ visualizePitch: true }),
+      new NavigationControl({ visualizePitch: true, showCompass: true }),
       "top-right",
     );
     map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
@@ -584,7 +662,7 @@ export default function MapView() {
       if (!map.isStyleLoaded()) return;
       addDataLayers(map, "koaza");
       try {
-        applyTerrain(map, terrainEnabledRef.current);
+        applyTerrain(map, terrainEnabledRef.current, terrainExaggerationRef.current);
       } catch (error) {
         console.error("地形設定の初期化に失敗しました:", error);
       }
@@ -772,6 +850,40 @@ export default function MapView() {
     };
     map.on("mousedown", handleSelectionMouseDown);
 
+    // 右ドラッグ／Ctrl+ドラッグに加えて、スクロールボタン（ホイールクリック）を
+    // 押しながらのドラッグでも地図の回転・傾きを操作できるようにする（3ボタンマウス向け）。
+    // なお、MacBookのトラックパッドは既定で「2本指クリック」が副ボタン（右クリック）に
+    // 割り当てられているため、2本指タップしながらのドラッグで既存の右ドラッグ操作と同様に
+    // 回転・傾きの操作ができる。スマートフォン等のタッチ端末では、maplibre-glが標準で
+    // 対応しているピンチ操作（ズーム）・2本指ひねり（回転）・2本指の垂直ドラッグ（傾き）を
+    // そのまま利用できる。
+    let middleButtonDragActive = false;
+    let middleButtonLastPoint = null;
+    const handleMiddleButtonDown = (event) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      middleButtonDragActive = true;
+      middleButtonLastPoint = { x: event.clientX, y: event.clientY };
+    };
+    const handleMiddleButtonMove = (event) => {
+      if (!middleButtonDragActive || !middleButtonLastPoint) return;
+      const dx = event.clientX - middleButtonLastPoint.x;
+      const dy = event.clientY - middleButtonLastPoint.y;
+      middleButtonLastPoint = { x: event.clientX, y: event.clientY };
+      map.setBearing(map.getBearing() - dx * MIDDLE_BUTTON_ROTATE_SENSITIVITY);
+      map.setPitch(
+        Math.min(Math.max(map.getPitch() + dy * MIDDLE_BUTTON_PITCH_SENSITIVITY, 0), map.getMaxPitch()),
+      );
+    };
+    const handleMiddleButtonUp = () => {
+      middleButtonDragActive = false;
+      middleButtonLastPoint = null;
+    };
+    const canvasContainer = map.getCanvasContainer();
+    canvasContainer.addEventListener("mousedown", handleMiddleButtonDown);
+    window.addEventListener("mousemove", handleMiddleButtonMove);
+    window.addEventListener("mouseup", handleMiddleButtonUp);
+
     return () => {
       clearTimeout(debounceTimer);
       clearInterval(initPollTimer);
@@ -783,6 +895,9 @@ export default function MapView() {
       map.off("mousedown", handleSelectionMouseDown);
       map.off("mousemove", handleSelectionMouseMove);
       map.off("mouseup", handleSelectionMouseUp);
+      canvasContainer.removeEventListener("mousedown", handleMiddleButtonDown);
+      window.removeEventListener("mousemove", handleMiddleButtonMove);
+      window.removeEventListener("mouseup", handleMiddleButtonUp);
       locationMarkerEl.remove();
       locationMarkerElRef.current = null;
       for (const marker of arPlacementMarkers.values()) marker.el.remove();
@@ -791,7 +906,7 @@ export default function MapView() {
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialCameraReady]);
 
   // 背景地図の切り替え
   // スタイル全体を作り直す(setStyle)と、森林簿・地籍・地形などのカスタムレイヤーが
@@ -858,11 +973,11 @@ export default function MapView() {
     if (!map) return;
 
     try {
-      applyTerrain(map, terrainEnabled);
+      applyTerrain(map, terrainEnabled, terrainExaggeration);
     } catch (error) {
       console.error("地形設定の変更に失敗しました:", error);
     }
-  }, [terrainEnabled]);
+  }, [terrainEnabled, terrainExaggeration]);
 
   // 現在地の常時追跡表示。マーカー自体の見た目・配置ロジックはapplyLocationPositionと
   // updateLocationMarkerElement（地図初期化時に定義）に共通化してある。
@@ -1026,9 +1141,22 @@ export default function MapView() {
             標高タイルによる起伏を有効にする
           </label>
           {terrainEnabled && (
-            <p className={styles.status}>
-              標高データはズームレベル12以上でのみ表示されます
-            </p>
+            <>
+              <label className={styles.subOption}>
+                標高の強調: {terrainExaggeration.toFixed(1)}倍
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={terrainExaggeration}
+                  onChange={(event) => setTerrainExaggeration(Number(event.target.value))}
+                />
+              </label>
+              <p className={styles.status}>
+                標高データはズームレベル12以上でのみ表示されます
+              </p>
+            </>
           )}
         </section>
 
@@ -1133,8 +1261,9 @@ export default function MapView() {
         {status && <p className={styles.status}>{status}</p>}
 
         <p className={styles.hint}>
-          左ドラッグ: パン / 右ドラッグ（またはCtrl+ドラッグ）: 回転・傾き /
-          ホイール: ズーム / クリック: 区画情報
+          {isTouchDevice
+            ? "1本指ドラッグ: パン / 2本指ピンチ: ズーム / 2本指のひねり・上下ドラッグ: 回転・傾き / タップ: 区画情報"
+            : "左ドラッグ: パン / 右ドラッグ・Ctrl+ドラッグ・ホイールクリック+ドラッグ（MacBookは2本指クリック+ドラッグ）: 回転・傾き / ホイール: ズーム / クリック: 区画情報"}
         </p>
 
         <p className={styles.attribution}>
