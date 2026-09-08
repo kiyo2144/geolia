@@ -24,10 +24,18 @@ const WEATHER_TYPE_LABELS = { sunny: "晴れ", cloudy: "曇り", rainy: "雨" };
 // マップ上でクリックした地点を中心に、この半径（メートル）の範囲を読み込んで
 // 一人称視点で歩き回れるようにする（要件定義: 現地に行かずにAR配置を確認する用途）。
 const RADIUS_METERS = 150;
-const EYE_HEIGHT_METERS = 1.6;
+const EYE_HEIGHT_METERS = 2.4;
 const MOVE_SPEED_MPS = 3.5;
 const DRAG_SENSITIVITY = 0.0035;
 const MAX_PITCH = Math.PI / 2 - 0.05;
+
+// 画面下部の移動ボタン（キーボードなしでの操作用）
+const MOVEMENT_PAD_BUTTONS = [
+  { key: "forward", label: "▲", area: "up" },
+  { key: "left", label: "◀", area: "left" },
+  { key: "right", label: "▶", area: "right" },
+  { key: "backward", label: "▼", area: "down" },
+];
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -44,7 +52,15 @@ function makeBboxAroundPoint(lng, lat, radiusMeters) {
  * 実際の道路・敷地境界などによる移動制約は今回のスコープでは扱わず、
  * 読み込み範囲内を自由に歩き回れるようにする（将来的な改善事項）。
  */
-function FirstPersonControls({ project, sampleElevation, minElevation, boundsMeters, isDraggingRef }) {
+function FirstPersonControls({
+  project,
+  sampleElevation,
+  minElevation,
+  boundsMeters,
+  isDraggingRef,
+  moveInputRef,
+  minimapMarkerRef,
+}) {
   const { camera, gl } = useThree();
   const keysRef = useRef({});
   const yawRef = useRef(0);
@@ -99,15 +115,16 @@ function FirstPersonControls({ project, sampleElevation, minElevation, boundsMet
 
   useFrame((_state, delta) => {
     const keys = keysRef.current;
+    const padInput = moveInputRef.current;
     const yaw = yawRef.current;
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
     const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
     const move = new THREE.Vector3();
-    if (keys["KeyW"] || keys["ArrowUp"]) move.add(forward);
-    if (keys["KeyS"] || keys["ArrowDown"]) move.sub(forward);
-    if (keys["KeyD"] || keys["ArrowRight"]) move.add(right);
-    if (keys["KeyA"] || keys["ArrowLeft"]) move.sub(right);
+    if (keys["KeyW"] || keys["ArrowUp"] || padInput.forward) move.add(forward);
+    if (keys["KeyS"] || keys["ArrowDown"] || padInput.backward) move.sub(forward);
+    if (keys["KeyD"] || keys["ArrowRight"] || padInput.right) move.add(right);
+    if (keys["KeyA"] || keys["ArrowLeft"] || padInput.left) move.sub(right);
 
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(MOVE_SPEED_MPS * delta);
@@ -122,9 +139,48 @@ function FirstPersonControls({ project, sampleElevation, minElevation, boundsMet
 
     camera.position.copy(positionRef.current);
     camera.rotation.set(pitchRef.current, yaw, 0, "YXZ");
+
+    // サブマップ上の現在地・向きを更新する（Reactの再レンダリングを避けるためDOMを直接操作）
+    if (minimapMarkerRef.current) {
+      const ratioX = clamp(positionRef.current.x / boundsMeters, -1, 1);
+      const ratioZ = clamp(positionRef.current.z / boundsMeters, -1, 1);
+      const leftPercent = 50 + ratioX * 50;
+      const topPercent = 50 + ratioZ * 50;
+      const rotationDeg = THREE.MathUtils.radToDeg(-yaw);
+      minimapMarkerRef.current.style.left = `${leftPercent}%`;
+      minimapMarkerRef.current.style.top = `${topPercent}%`;
+      minimapMarkerRef.current.style.transform = `translate(-50%, -50%) rotate(${rotationDeg}deg)`;
+    }
   });
 
   return null;
+}
+
+/** キーボードなしでも移動できるよう、画面下部に半透明の方向ボタンを表示する */
+function MovementPad({ moveInputRef }) {
+  const setPressed = (key, pressed) => () => {
+    moveInputRef.current[key] = pressed;
+  };
+
+  return (
+    <div className={styles.movementPad}>
+      {MOVEMENT_PAD_BUTTONS.map(({ key, label, area }) => (
+        <button
+          key={key}
+          type="button"
+          className={styles.padButton}
+          style={{ gridArea: area }}
+          onPointerDown={setPressed(key, true)}
+          onPointerUp={setPressed(key, false)}
+          onPointerLeave={setPressed(key, false)}
+          onPointerCancel={setPressed(key, false)}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -145,6 +201,8 @@ export function FirstPersonView({
   const [sceneData, setSceneData] = useState(null);
   const [status, setStatus] = useState("周辺データを読み込み中...");
   const isDraggingRef = useRef(false);
+  const moveInputRef = useRef({ forward: false, backward: false, left: false, right: false });
+  const minimapMarkerRef = useRef(null);
   const { timeOfDay, weatherType } = useLocationWeather(origin.lat, origin.lng);
   const lighting = getLightingConfig(timeOfDay, weatherType);
 
@@ -260,7 +318,7 @@ export function FirstPersonView({
         <button type="button" className={styles.closeButton} onClick={onClose}>
           閉じる
         </button>
-        <p className={styles.hint}>W/A/S/D: 移動　ドラッグ: 視点回転</p>
+        <p className={styles.hint}>W/A/S/D または画面下部のボタン: 移動　ドラッグ: 視点回転</p>
         <p className={styles.hint}>
           {TIME_OF_DAY_LABELS[timeOfDay]}・{WEATHER_TYPE_LABELS[weatherType]}
         </p>
@@ -292,6 +350,8 @@ export function FirstPersonView({
             minElevation={sceneData.minElevation}
             boundsMeters={RADIUS_METERS * 0.95}
             isDraggingRef={isDraggingRef}
+            moveInputRef={moveInputRef}
+            minimapMarkerRef={minimapMarkerRef}
           />
 
           {sceneData.groups.map((group, index) => (
@@ -318,6 +378,15 @@ export function FirstPersonView({
           </Suspense>
         </Canvas>
       )}
+
+      {sceneData && (
+        <div className={styles.minimap}>
+          <span className={styles.minimapNorth}>N</span>
+          <div ref={minimapMarkerRef} className={styles.minimapPlayer} />
+        </div>
+      )}
+
+      {sceneData && <MovementPad moveInputRef={moveInputRef} />}
     </div>
   );
 }
