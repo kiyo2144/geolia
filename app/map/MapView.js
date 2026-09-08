@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase/client";
 import { FirstPersonView } from "./FirstPersonView";
+import { createElevationSampler } from "./mapMeshBuilders";
 import styles from "./MapView.module.css";
 
 // v6は最新すぎてバンドラー環境でのWorker解決やfill-extrusion描画に問題があったため、
@@ -355,6 +356,12 @@ export default function MapView() {
   // SVGオーバーレイ（キャンバスコンテナに重ねて表示する。地図のレイヤーではないので
   // ズーム・回転・傾きに合わせて自前で座標を更新する必要がある）。
   const groundLinesSvgRef = useRef(null);
+  // 現在地・AR配置ピンの地表面の高さ算出には、map.queryTerrainElevation()ではなく
+  // これ（一人称視点・GLBエクスポートと同じ、標高タイルを直接取得・デコードする
+  // 独自実装）を使う。実機検証の結果、map.queryTerrainElevation()は環境によって
+  // 標高タイルの実際の値と大きく異なる値を返すことがあり、地図を傾けた際に
+  // マーカーの位置が地形とずれて見える不具合の原因になっていたため。
+  const elevationSamplerRef = useRef(() => 0);
 
   const [arPlacementsVisible, setArPlacementsVisible] = useState(true);
   const arPlacementsVisibleRef = useRef(arPlacementsVisible);
@@ -466,6 +473,28 @@ export default function MapView() {
     await Promise.all(tasks);
     setStatus("");
   }, [supabase]);
+
+  // 現在の表示範囲の標高タイルを取得・デコードし、現在地・AR配置ピンの地表面の
+  // 高さ算出に使うサンプラーを更新する（map.queryTerrainElevation()を使わない理由は
+  // elevationSamplerRefの定義コメントを参照）。
+  const refreshElevationSampler = useCallback(async () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = map.getBounds();
+    const bbox = {
+      minLng: bounds.getWest(),
+      minLat: bounds.getSouth(),
+      maxLng: bounds.getEast(),
+      maxLat: bounds.getNorth(),
+    };
+    try {
+      elevationSamplerRef.current = await createElevationSampler(bbox);
+      updateLocationMarkerRef.current();
+      updateArPlacementMarkersRef.current();
+    } catch (error) {
+      console.error("標高データの取得に失敗しました:", error);
+    }
+  }, []);
 
   // AR配置（ar_placements）を表示範囲内で取得し、ピン(DOM要素)として表示する。
   // 森林簿・地籍と同様に表示範囲(bbox)内のみを取得する。
@@ -736,6 +765,7 @@ export default function MapView() {
       });
       refreshData();
       refreshArPlacements();
+      refreshElevationSampler();
     };
 
     map.on("load", tryInitLayers);
@@ -750,6 +780,7 @@ export default function MapView() {
       debounceTimer = setTimeout(() => {
         refreshData();
         refreshArPlacements();
+        refreshElevationSampler();
       }, 300);
     });
 
@@ -825,7 +856,7 @@ export default function MapView() {
         return;
       }
       const hasAltitude = pos.altitude !== null;
-      const groundElevation = map.queryTerrainElevation([pos.lng, pos.lat]) ?? 0;
+      const groundElevation = elevationSamplerRef.current(pos.lng, pos.lat);
       const elevation = hasAltitude ? pos.altitude : groundElevation;
       const point = projectAtElevation(map, pos.lng, pos.lat, elevation);
       locationMarkerEl.style.display = "";
@@ -851,7 +882,7 @@ export default function MapView() {
     const updateArPlacementMarkers = () => {
       for (const marker of arPlacementMarkers.values()) {
         const hasAltitude = marker.altitude !== null && marker.altitude !== undefined;
-        const groundElevation = map.queryTerrainElevation([marker.lng, marker.lat]) ?? 0;
+        const groundElevation = elevationSamplerRef.current(marker.lng, marker.lat);
         const elevation = hasAltitude ? marker.altitude : groundElevation;
         const point = projectAtElevation(map, marker.lng, marker.lat, elevation);
         marker.el.style.display = "";
