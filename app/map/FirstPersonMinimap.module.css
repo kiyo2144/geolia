@@ -1,0 +1,106 @@
+.wrapper {
+  position: absolute;
+  top: 4.5rem;
+  right: 0.75rem;
+  z-index: 2;
+}
+
+.mapContainer {
+  width: 160px;
+  height: 160px;
+  min-width: 120px;
+  min-height: 120px;
+  max-width: 360px;
+  max-height: 360px;
+  border-radius: 12px;
+  overflow: hidden;
+  resize: both;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  cursor: crosshair;
+}
+
+.compassBadge {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(13, 17, 23, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  color: #fff;
+  pointer-events: none;
+}
+
+.compassNeedle {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-bottom: 9px solid #ff5252;
+  transform-origin: 50% 11px;
+  transition: transform 0.15s linear;
+}
+
+.compassPermissionButton {
+  position: absolute;
+  bottom: -2rem;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  font-size: 0.7rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border: none;
+  background: rgba(13, 17, 23, 0.85);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.zoomSlider {
+  position: absolute;
+  bottom: 0.4rem;
+  left: 0.4rem;
+  width: calc(100% - 0.8rem);
+  z-index: 1;
+}
+
+.hintText {
+  position: absolute;
+  top: -1.4rem;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  margin: 0;
+  font-size: 0.65rem;
+  color: #c9d1d9;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.playerMarker {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 14px solid #4fc3f7;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
+}
+
+.placementMarker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff9f43;
+  border: 1.5px solid rgba(13, 17, 23, 0.85);
+}

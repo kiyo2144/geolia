@@ -14,6 +14,7 @@ import {
   createElevationSampler,
   makeProjector,
 } from "./mapMeshBuilders";
+import { FirstPersonMinimap } from "./FirstPersonMinimap";
 import { getLightingConfig, SkyEnvironment } from "./SkyEnvironment";
 import { useLocationWeather } from "./useLocationWeather";
 import styles from "./FirstPersonView.module.css";
@@ -59,7 +60,8 @@ function FirstPersonControls({
   boundsMeters,
   isDraggingRef,
   moveInputRef,
-  minimapMarkerRef,
+  playerStateRef,
+  teleportRequestRef,
 }) {
   const { camera, gl } = useThree();
   const keysRef = useRef({});
@@ -114,6 +116,14 @@ function FirstPersonControls({
   }, [gl, isDraggingRef]);
 
   useFrame((_state, delta) => {
+    // サブマップ上のクリックによる瞬間移動リクエストがあれば先に反映する
+    if (teleportRequestRef.current) {
+      const { x, z } = teleportRequestRef.current;
+      positionRef.current.x = clamp(x, -boundsMeters, boundsMeters);
+      positionRef.current.z = clamp(z, -boundsMeters, boundsMeters);
+      teleportRequestRef.current = null;
+    }
+
     const keys = keysRef.current;
     const padInput = moveInputRef.current;
     const yaw = yawRef.current;
@@ -140,17 +150,11 @@ function FirstPersonControls({
     camera.position.copy(positionRef.current);
     camera.rotation.set(pitchRef.current, yaw, 0, "YXZ");
 
-    // サブマップ上の現在地・向きを更新する（Reactの再レンダリングを避けるためDOMを直接操作）
-    if (minimapMarkerRef.current) {
-      const ratioX = clamp(positionRef.current.x / boundsMeters, -1, 1);
-      const ratioZ = clamp(positionRef.current.z / boundsMeters, -1, 1);
-      const leftPercent = 50 + ratioX * 50;
-      const topPercent = 50 + ratioZ * 50;
-      const rotationDeg = THREE.MathUtils.radToDeg(-yaw);
-      minimapMarkerRef.current.style.left = `${leftPercent}%`;
-      minimapMarkerRef.current.style.top = `${topPercent}%`;
-      minimapMarkerRef.current.style.transform = `translate(-50%, -50%) rotate(${rotationDeg}deg)`;
-    }
+    // サブマップ側は独自のタイマーでこの値を読み取って表示を更新する
+    // （毎フレームDOMもしくは地図ライブラリを直接更新するとコストが高いため）
+    playerStateRef.current.x = positionRef.current.x;
+    playerStateRef.current.z = positionRef.current.z;
+    playerStateRef.current.yaw = yaw;
   });
 
   return null;
@@ -184,28 +188,6 @@ function MovementPad({ moveInputRef }) {
 }
 
 /**
- * 現在地・向きと、読み込み範囲・周辺のAR配置を平面図で示すサブマップ。
- * プレイヤーの位置・向きは毎フレームDOMを直接更新するため、それ以外
- * （範囲円・AR配置マーカー）は初回のみ算出する静的なSVGとして描画する。
- */
-function Minimap({ placements, boundsMeters, markerRef }) {
-  return (
-    <div className={styles.minimap}>
-      <span className={styles.minimapNorth}>N</span>
-      <svg viewBox="-100 -100 200 200" className={styles.minimapSvg}>
-        <circle cx={0} cy={0} r={98} className={styles.minimapBoundary} />
-        {placements.map((placement) => {
-          const x = clamp((placement.localX / boundsMeters) * 98, -98, 98);
-          const y = clamp((placement.localZ / boundsMeters) * 98, -98, 98);
-          return <circle key={placement.id} cx={x} cy={y} r={4} className={styles.minimapPlacement} />;
-        })}
-      </svg>
-      <div ref={markerRef} className={styles.minimapPlayer} />
-    </div>
-  );
-}
-
-/**
  * マップ上でクリックした任意の地点を、一人称視点で見回しながら確認できる
  * オーバーレイ。現在チェックが入っているレイヤー（森林簿・地籍・OSM建物）と、
  * 周辺のAR配置を、実際の位置関係のまま3D空間に再現する。
@@ -224,7 +206,8 @@ export function FirstPersonView({
   const [status, setStatus] = useState("周辺データを読み込み中...");
   const isDraggingRef = useRef(false);
   const moveInputRef = useRef({ forward: false, backward: false, left: false, right: false });
-  const minimapMarkerRef = useRef(null);
+  const playerStateRef = useRef({ x: 0, z: 0, yaw: 0 });
+  const teleportRequestRef = useRef(null);
   const { timeOfDay, weatherType } = useLocationWeather(origin.lat, origin.lng);
   const lighting = getLightingConfig(timeOfDay, weatherType);
 
@@ -373,7 +356,8 @@ export function FirstPersonView({
             boundsMeters={RADIUS_METERS * 0.95}
             isDraggingRef={isDraggingRef}
             moveInputRef={moveInputRef}
-            minimapMarkerRef={minimapMarkerRef}
+            playerStateRef={playerStateRef}
+            teleportRequestRef={teleportRequestRef}
           />
 
           {sceneData.groups.map((group, index) => (
@@ -402,10 +386,13 @@ export function FirstPersonView({
       )}
 
       {sceneData && (
-        <Minimap
+        <FirstPersonMinimap
+          origin={origin}
+          project={sceneData.project}
           placements={sceneData.placements}
           boundsMeters={RADIUS_METERS * 0.95}
-          markerRef={minimapMarkerRef}
+          playerStateRef={playerStateRef}
+          teleportRequestRef={teleportRequestRef}
         />
       )}
 
