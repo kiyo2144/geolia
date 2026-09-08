@@ -14,7 +14,12 @@ import {
   createElevationSampler,
   makeProjector,
 } from "./mapMeshBuilders";
+import { getLightingConfig, SkyEnvironment } from "./SkyEnvironment";
+import { useLocationWeather } from "./useLocationWeather";
 import styles from "./FirstPersonView.module.css";
+
+const TIME_OF_DAY_LABELS = { morning: "朝", day: "昼", night: "夜" };
+const WEATHER_TYPE_LABELS = { sunny: "晴れ", cloudy: "曇り", rainy: "雨" };
 
 // マップ上でクリックした地点を中心に、この半径（メートル）の範囲を読み込んで
 // 一人称視点で歩き回れるようにする（要件定義: 現地に行かずにAR配置を確認する用途）。
@@ -140,6 +145,8 @@ export function FirstPersonView({
   const [sceneData, setSceneData] = useState(null);
   const [status, setStatus] = useState("周辺データを読み込み中...");
   const isDraggingRef = useRef(false);
+  const { timeOfDay, weatherType } = useLocationWeather(origin.lat, origin.lng);
+  const lighting = getLightingConfig(timeOfDay, weatherType);
 
   useEffect(() => {
     let cancelled = false;
@@ -254,6 +261,9 @@ export function FirstPersonView({
           閉じる
         </button>
         <p className={styles.hint}>W/A/S/D: 移動　ドラッグ: 視点回転</p>
+        <p className={styles.hint}>
+          {TIME_OF_DAY_LABELS[timeOfDay]}・{WEATHER_TYPE_LABELS[weatherType]}
+        </p>
       </div>
 
       {status && <p className={styles.status}>{status}</p>}
@@ -264,9 +274,16 @@ export function FirstPersonView({
           camera={{ fov: 75, near: 0.1, far: 2000, position: [0, EYE_HEIGHT_METERS, 0] }}
           gl={{ antialias: true }}
         >
-          <ambientLight intensity={1.1} />
-          <directionalLight position={[120, 200, 80]} intensity={1.1} />
-          <hemisphereLight args={["#bcd8ff", "#4a4a3a", 0.6]} />
+          <SkyEnvironment timeOfDay={timeOfDay} weatherType={weatherType} />
+          <ambientLight color={lighting.ambient.color} intensity={lighting.ambient.intensity} />
+          <directionalLight
+            color={lighting.directional.color}
+            intensity={lighting.directional.intensity}
+            position={lighting.directional.position}
+          />
+          <hemisphereLight
+            args={[lighting.hemisphere.sky, lighting.hemisphere.ground, lighting.hemisphere.intensity]}
+          />
           {hasSplat && <SparkSetup />}
 
           <FirstPersonControls
