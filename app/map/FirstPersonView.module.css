@@ -70,8 +70,29 @@
   top: 0.3rem;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 1;
   font-size: 0.7rem;
   color: #c9d1d9;
+}
+
+.minimapSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.minimapBoundary {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.minimapPlacement {
+  fill: #ff9f43;
+  stroke: rgba(13, 17, 23, 0.8);
+  stroke-width: 1;
 }
 
 .minimapPlayer {

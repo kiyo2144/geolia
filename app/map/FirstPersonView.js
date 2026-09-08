@@ -184,6 +184,28 @@ function MovementPad({ moveInputRef }) {
 }
 
 /**
+ * 現在地・向きと、読み込み範囲・周辺のAR配置を平面図で示すサブマップ。
+ * プレイヤーの位置・向きは毎フレームDOMを直接更新するため、それ以外
+ * （範囲円・AR配置マーカー）は初回のみ算出する静的なSVGとして描画する。
+ */
+function Minimap({ placements, boundsMeters, markerRef }) {
+  return (
+    <div className={styles.minimap}>
+      <span className={styles.minimapNorth}>N</span>
+      <svg viewBox="-100 -100 200 200" className={styles.minimapSvg}>
+        <circle cx={0} cy={0} r={98} className={styles.minimapBoundary} />
+        {placements.map((placement) => {
+          const x = clamp((placement.localX / boundsMeters) * 98, -98, 98);
+          const y = clamp((placement.localZ / boundsMeters) * 98, -98, 98);
+          return <circle key={placement.id} cx={x} cy={y} r={4} className={styles.minimapPlacement} />;
+        })}
+      </svg>
+      <div ref={markerRef} className={styles.minimapPlayer} />
+    </div>
+  );
+}
+
+/**
  * マップ上でクリックした任意の地点を、一人称視点で見回しながら確認できる
  * オーバーレイ。現在チェックが入っているレイヤー（森林簿・地籍・OSM建物）と、
  * 周辺のAR配置を、実際の位置関係のまま3D空間に再現する。
@@ -380,10 +402,11 @@ export function FirstPersonView({
       )}
 
       {sceneData && (
-        <div className={styles.minimap}>
-          <span className={styles.minimapNorth}>N</span>
-          <div ref={minimapMarkerRef} className={styles.minimapPlayer} />
-        </div>
+        <Minimap
+          placements={sceneData.placements}
+          boundsMeters={RADIUS_METERS * 0.95}
+          markerRef={minimapMarkerRef}
+        />
       )}
 
       {sceneData && <MovementPad moveInputRef={moveInputRef} />}
