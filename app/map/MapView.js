@@ -848,6 +848,11 @@ export default function MapView() {
     locationMarkerElRef.current = locationMarkerEl;
     const locationGroundLine = createGroundLineElements(groundLinesSvg, LOCATION_MARKER_COLOR);
 
+    // 実際にmaplibre-glが地形を描画する高さ（標高タイルの値 × 強調倍率。
+    // 地形表現が無効なときは平面表示になるため0）に合わせる。
+    const getRenderedGroundElevation = (lng, lat) =>
+      terrainEnabledRef.current ? elevationSamplerRef.current(lng, lat) * terrainExaggerationRef.current : 0;
+
     const updateLocationMarkerElement = () => {
       const pos = locationPositionRef.current;
       if (!pos) {
@@ -856,7 +861,7 @@ export default function MapView() {
         return;
       }
       const hasAltitude = pos.altitude !== null;
-      const groundElevation = elevationSamplerRef.current(pos.lng, pos.lat);
+      const groundElevation = getRenderedGroundElevation(pos.lng, pos.lat);
       const elevation = hasAltitude ? pos.altitude : groundElevation;
       const point = projectAtElevation(map, pos.lng, pos.lat, elevation);
       locationMarkerEl.style.display = "";
@@ -882,7 +887,7 @@ export default function MapView() {
     const updateArPlacementMarkers = () => {
       for (const marker of arPlacementMarkers.values()) {
         const hasAltitude = marker.altitude !== null && marker.altitude !== undefined;
-        const groundElevation = elevationSamplerRef.current(marker.lng, marker.lat);
+        const groundElevation = getRenderedGroundElevation(marker.lng, marker.lat);
         const elevation = hasAltitude ? marker.altitude : groundElevation;
         const point = projectAtElevation(map, marker.lng, marker.lat, elevation);
         marker.el.style.display = "";
