@@ -276,6 +276,52 @@ function projectAtElevation(map, lng, lat, elevationMeters) {
   return map.transform.locationPoint({ lng, lat }, elevationSource);
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// 地形（標高タイル）上の地点を示す小さな点と、そこからマーカー（現在地・AR配置）の
+// 先端までを結ぶ線。高度によって空中に浮いて見えるマーカーが、地形上のどの位置の
+// 真上にあるのかを分かりやすくするために使う（高度が無い＝地表面のマーカーには不要）。
+function createGroundLineElements(svgRoot, color) {
+  const line = document.createElementNS(SVG_NS, "line");
+  line.setAttribute("stroke", color);
+  line.setAttribute("stroke-width", "2");
+  line.setAttribute("stroke-dasharray", "4 3");
+  line.style.display = "none";
+
+  const dot = document.createElementNS(SVG_NS, "circle");
+  dot.setAttribute("r", "4");
+  dot.setAttribute("fill", color);
+  dot.setAttribute("stroke", "#ffffff");
+  dot.setAttribute("stroke-width", "1.5");
+  dot.style.display = "none";
+
+  svgRoot.appendChild(line);
+  svgRoot.appendChild(dot);
+  return { line, dot };
+}
+
+function updateGroundLine(elements, groundPoint, tipPoint) {
+  const { line, dot } = elements;
+  if (!groundPoint) {
+    line.style.display = "none";
+    dot.style.display = "none";
+    return;
+  }
+  line.style.display = "";
+  dot.style.display = "";
+  line.setAttribute("x1", groundPoint.x);
+  line.setAttribute("y1", groundPoint.y);
+  line.setAttribute("x2", tipPoint.x);
+  line.setAttribute("y2", tipPoint.y);
+  dot.setAttribute("cx", groundPoint.x);
+  dot.setAttribute("cy", groundPoint.y);
+}
+
+function removeGroundLine(elements) {
+  elements.line.remove();
+  elements.dot.remove();
+}
+
 export default function MapView() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -305,6 +351,10 @@ export default function MapView() {
   const locationMarkerElRef = useRef(null);
   const locationPositionRef = useRef(null);
   const updateLocationMarkerRef = useRef(() => {});
+  // 現在地・AR配置ピンについて、高度がある場合に地形上の地点から先端まで線を引くための
+  // SVGオーバーレイ（キャンバスコンテナに重ねて表示する。地図のレイヤーではないので
+  // ズーム・回転・傾きに合わせて自前で座標を更新する必要がある）。
+  const groundLinesSvgRef = useRef(null);
 
   const [arPlacementsVisible, setArPlacementsVisible] = useState(true);
   const arPlacementsVisibleRef = useRef(arPlacementsVisible);
@@ -426,7 +476,10 @@ export default function MapView() {
     const markers = arPlacementMarkersRef.current;
 
     if (!arPlacementsVisibleRef.current) {
-      for (const marker of markers.values()) marker.el.remove();
+      for (const marker of markers.values()) {
+        marker.el.remove();
+        removeGroundLine(marker.groundLine);
+      }
       markers.clear();
       updateArPlacementMarkersRef.current();
       return;
@@ -480,12 +533,14 @@ export default function MapView() {
         arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).setHTML(html).addTo(map);
       });
 
-      markers.set(id, { el, lat, lng, altitude, properties: feature.properties });
+      const groundLine = createGroundLineElements(groundLinesSvgRef.current, AR_PLACEMENT_MARKER_COLOR);
+      markers.set(id, { el, lat, lng, altitude, properties: feature.properties, groundLine });
     }
 
     for (const [id, marker] of markers) {
       if (!seenIds.has(id)) {
         marker.el.remove();
+        removeGroundLine(marker.groundLine);
         markers.delete(id);
       }
     }
@@ -744,24 +799,44 @@ export default function MapView() {
       popup.setLngLat(event.lngLat).setHTML(html).addTo(map);
     });
 
+    // 高度のあるマーカー（現在地・AR配置）について、地形上の地点から先端までを結ぶ線を
+    // 描画するためのSVGオーバーレイ。マーカー本体と同様にキャンバスコンテナに重ねる。
+    const groundLinesSvg = document.createElementNS(SVG_NS, "svg");
+    groundLinesSvg.setAttribute(
+      "style",
+      "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;",
+    );
+    map.getCanvasContainer().appendChild(groundLinesSvg);
+    groundLinesSvgRef.current = groundLinesSvg;
+
     // 現在地マーカー（DOM要素）。地形の起伏やズーム・傾きが変わるたびに
     // 位置を再計算する必要があるため、レイヤーではなくキャンバスコンテナに
     // 直接重ねて、地図の描画イベントに合わせて自前で位置を更新する。
     const locationMarkerEl = createPinMarkerElement(LOCATION_MARKER_COLOR);
     map.getCanvasContainer().appendChild(locationMarkerEl);
     locationMarkerElRef.current = locationMarkerEl;
+    const locationGroundLine = createGroundLineElements(groundLinesSvg, LOCATION_MARKER_COLOR);
 
     const updateLocationMarkerElement = () => {
       const pos = locationPositionRef.current;
       if (!pos) {
         locationMarkerEl.style.display = "none";
+        updateGroundLine(locationGroundLine, null, null);
         return;
       }
-      const elevation =
-        pos.altitude !== null ? pos.altitude : map.queryTerrainElevation([pos.lng, pos.lat]) ?? 0;
+      const hasAltitude = pos.altitude !== null;
+      const groundElevation = map.queryTerrainElevation([pos.lng, pos.lat]) ?? 0;
+      const elevation = hasAltitude ? pos.altitude : groundElevation;
       const point = projectAtElevation(map, pos.lng, pos.lat, elevation);
       locationMarkerEl.style.display = "";
       locationMarkerEl.style.transform = `translate(${point.x}px, ${point.y}px)`;
+
+      if (hasAltitude) {
+        const groundPoint = projectAtElevation(map, pos.lng, pos.lat, groundElevation);
+        updateGroundLine(locationGroundLine, groundPoint, point);
+      } else {
+        updateGroundLine(locationGroundLine, null, null);
+      }
     };
     updateLocationMarkerRef.current = updateLocationMarkerElement;
     map.on("move", updateLocationMarkerElement);
@@ -775,13 +850,19 @@ export default function MapView() {
     arPlacementPopupRef.current = new Popup({ closeButton: true, closeOnClick: true });
     const updateArPlacementMarkers = () => {
       for (const marker of arPlacementMarkers.values()) {
-        const elevation =
-          marker.altitude !== null && marker.altitude !== undefined
-            ? marker.altitude
-            : map.queryTerrainElevation([marker.lng, marker.lat]) ?? 0;
+        const hasAltitude = marker.altitude !== null && marker.altitude !== undefined;
+        const groundElevation = map.queryTerrainElevation([marker.lng, marker.lat]) ?? 0;
+        const elevation = hasAltitude ? marker.altitude : groundElevation;
         const point = projectAtElevation(map, marker.lng, marker.lat, elevation);
         marker.el.style.display = "";
         marker.el.style.transform = `translate(${point.x}px, ${point.y}px)`;
+
+        if (hasAltitude) {
+          const groundPoint = projectAtElevation(map, marker.lng, marker.lat, groundElevation);
+          updateGroundLine(marker.groundLine, groundPoint, point);
+        } else {
+          updateGroundLine(marker.groundLine, null, null);
+        }
       }
     };
     updateArPlacementMarkersRef.current = updateArPlacementMarkers;
@@ -902,6 +983,8 @@ export default function MapView() {
       locationMarkerElRef.current = null;
       for (const marker of arPlacementMarkers.values()) marker.el.remove();
       arPlacementMarkers.clear();
+      groundLinesSvg.remove();
+      groundLinesSvgRef.current = null;
       map.remove();
       mapRef.current = null;
     };
