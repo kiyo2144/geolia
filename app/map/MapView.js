@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase/client";
+import { FirstPersonView } from "./FirstPersonView";
 import styles from "./MapView.module.css";
 
 // v6は最新すぎてバンドラー環境でのWorker解決やfill-extrusion描画に問題があったため、
@@ -228,10 +229,7 @@ export default function MapView() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const skipNextBasemapChangeRef = useRef(true);
-  const supabaseRef = useRef(null);
-  if (!supabaseRef.current) {
-    supabaseRef.current = createClient();
-  }
+  const supabase = useMemo(() => createClient(), []);
 
   const [basemap, setBasemap] = useState("osm");
   const [forestVisible, setForestVisible] = useState(true);
@@ -276,6 +274,15 @@ export default function MapView() {
     selectionModeRef.current = isSelectingRectangle;
   }, [isSelectingRectangle]);
 
+  // 一人称視点で確認する機能。トグルをオンにした状態で地図をクリックすると、
+  // その地点を起点に一人称ビュー（FirstPersonView）を起動する。
+  const [firstPersonModeActive, setFirstPersonModeActive] = useState(false);
+  const firstPersonModeActiveRef = useRef(firstPersonModeActive);
+  useEffect(() => {
+    firstPersonModeActiveRef.current = firstPersonModeActive;
+  }, [firstPersonModeActive]);
+  const [firstPersonOrigin, setFirstPersonOrigin] = useState(null);
+
   const latestFlagsRef = useRef({ forestVisible, landVisible, buildingsVisible });
   useEffect(() => {
     latestFlagsRef.current = { forestVisible, landVisible, buildingsVisible };
@@ -316,7 +323,6 @@ export default function MapView() {
     } = latestFlagsRef.current;
 
     setStatus("読み込み中...");
-    const supabase = supabaseRef.current;
 
     const tasks = [];
     if (showForest) {
@@ -348,7 +354,7 @@ export default function MapView() {
     }
     await Promise.all(tasks);
     setStatus("");
-  }, []);
+  }, [supabase]);
 
   // AR配置（ar_placements）を表示範囲内で取得し、ピン(DOM要素)として表示する。
   // 森林簿・地籍と同様に表示範囲(bbox)内のみを取得する。
@@ -366,7 +372,7 @@ export default function MapView() {
     }
 
     const bounds = map.getBounds();
-    const { data, error } = await supabaseRef.current.rpc("ar_placements_in_bbox", {
+    const { data, error } = await supabase.rpc("ar_placements_in_bbox", {
       min_lng: bounds.getWest(),
       min_lat: bounds.getSouth(),
       max_lng: bounds.getEast(),
@@ -403,7 +409,7 @@ export default function MapView() {
           p.asset_type === "gaussian_splat" ? "Gaussian Splat" : "点群";
         const previewHtml = p.preview_storage_path
           ? `<img src="${
-              supabaseRef.current.storage.from("ar-assets").getPublicUrl(p.preview_storage_path)
+              supabase.storage.from("ar-assets").getPublicUrl(p.preview_storage_path)
                 .data.publicUrl
             }" alt="設置プレビュー" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block;" />`
           : "";
@@ -424,7 +430,7 @@ export default function MapView() {
     }
 
     updateArPlacementMarkersRef.current();
-  }, []);
+  }, [supabase]);
 
   // 取得した位置情報（GeolocationCoordinates）をマーカー・ステータス表示に反映する。
   // 常時追跡（watchPosition）と「現在地へ移動」ボタン（getCurrentPosition）の
@@ -514,7 +520,7 @@ export default function MapView() {
         includeBuildings: exportIncludeBuildings,
         includeBasemapTexture: exportIncludeTerrain && exportIncludeBasemapTexture,
         basemapKey: basemap,
-        supabase: supabaseRef.current,
+        supabase,
         onProgress: setExportStatus,
       });
       downloadGlb(arrayBuffer, `geolia_map_${Date.now()}.glb`);
@@ -533,6 +539,7 @@ export default function MapView() {
     exportIncludeBuildings,
     exportIncludeBasemapTexture,
     basemap,
+    supabase,
   ]);
 
   // 地図の初期化（マウント時に一度だけ）
@@ -615,6 +622,12 @@ export default function MapView() {
 
     const popup = new Popup({ closeButton: true, closeOnClick: true });
     map.on("click", (event) => {
+      if (firstPersonModeActiveRef.current) {
+        setFirstPersonOrigin({ lng: event.lngLat.lng, lat: event.lngLat.lat });
+        setFirstPersonModeActive(false);
+        return;
+      }
+
       const layerIds = [
         "forest-fill-a",
         "forest-fill-b",
@@ -880,12 +893,12 @@ export default function MapView() {
     };
   }, [locationEnabled, applyLocationPosition, handleLocationError]);
 
-  // 範囲選択（矩形）モード中はカーソルをcrosshairにして分かりやすくする
+  // 範囲選択（矩形）モード・一人称視点モード中はカーソルをcrosshairにして分かりやすくする
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.getCanvas().style.cursor = isSelectingRectangle ? "crosshair" : "";
-  }, [isSelectingRectangle]);
+    map.getCanvas().style.cursor = isSelectingRectangle || firstPersonModeActive ? "crosshair" : "";
+  }, [isSelectingRectangle, firstPersonModeActive]);
 
   return (
     <div className={styles.wrapper}>
@@ -1020,6 +1033,22 @@ export default function MapView() {
         </section>
 
         <section className={styles.section}>
+          <h2>現地確認（一人称視点）</h2>
+          <button
+            type="button"
+            className={styles.locateButton}
+            onClick={() => setFirstPersonModeActive((current) => !current)}
+            disabled={firstPersonModeActive}
+          >
+            {firstPersonModeActive ? "地図をクリックして開始地点を選択..." : "一人称視点で確認"}
+          </button>
+          <p className={styles.status}>
+            現在チェックが入っているレイヤー（森林簿・地籍・OSM建物）とAR配置を、
+            クリックした地点から見回して確認できます。
+          </p>
+        </section>
+
+        <section className={styles.section}>
           <h2>マップのエクスポート（GLB）</h2>
           <label>
             <input
@@ -1133,6 +1162,19 @@ export default function MapView() {
       </aside>
 
       <div ref={mapContainerRef} className={styles.mapContainer} />
+
+      {firstPersonOrigin && (
+        <FirstPersonView
+          origin={firstPersonOrigin}
+          forestVisible={forestVisible}
+          landVisible={landVisible}
+          landColorMode={landColorMode}
+          buildingsVisible={buildingsVisible}
+          basemap={basemap}
+          supabase={supabase}
+          onClose={() => setFirstPersonOrigin(null)}
+        />
+      )}
     </div>
   );
 }

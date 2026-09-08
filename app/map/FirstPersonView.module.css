@@ -1,0 +1,53 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #0d1117;
+  color: #f0f3f7;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+}
+
+.topBar {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.closeButton {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: rgba(13, 17, 23, 0.85);
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: #c9d1d9;
+  background: rgba(13, 17, 23, 0.7);
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+}
+
+.status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  font-size: 0.95rem;
+  color: #c9d1d9;
+}

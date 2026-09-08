@@ -21,7 +21,7 @@ const CANVAS_OVERLAY_STYLE = {
 };
 
 /** 詳細表示: 実データ(点群/Gaussian Splat/静止画/GIF/VRM)を読み込んで表示する */
-function DetailedPlacement({ placement, url, motionAssetUrl }) {
+export function DetailedPlacement({ placement, url, motionAssetUrl }) {
   return (
     <group rotation={[placement.rotation_x ?? 0, placement.rotation_y ?? 0, 0]} scale={placement.scale ?? 1}>
       {placement.asset_type === "gaussian_splat" ? (
