@@ -957,6 +957,13 @@ export default function MapView() {
     const getRenderedGroundElevation = (lng, lat) =>
       terrainEnabledRef.current ? elevationSamplerRef.current(lng, lat) * terrainExaggerationRef.current : 0;
 
+    // GPS高度など実測の高度も、地形と同じ強調倍率を掛けて表示する。強調していない
+    // 地形の上に強調していない高度のピンを乗せると、高度が地形の標高と近い（＝実際は
+    // 地表付近にいる）場合でも、強調された地形の方が高く描画されて地中に沈んで見える
+    // など不自然になるため（地形表現が無効なときは倍率を掛けない実測値のまま表示する）。
+    const getRenderedAltitude = (rawAltitude) =>
+      terrainEnabledRef.current ? rawAltitude * terrainExaggerationRef.current : rawAltitude;
+
     const updateLocationMarkerElement = () => {
       const pos = locationPositionRef.current;
       if (!pos) {
@@ -966,7 +973,7 @@ export default function MapView() {
       }
       const hasAltitude = pos.altitude !== null;
       const groundElevation = getRenderedGroundElevation(pos.lng, pos.lat);
-      const elevation = hasAltitude ? pos.altitude : groundElevation;
+      const elevation = hasAltitude ? getRenderedAltitude(pos.altitude) : groundElevation;
       const point = projectAtElevation(map, pos.lng, pos.lat, elevation);
       locationMarkerEl.style.display = "";
       locationMarkerEl.style.transform = `translate(${point.x}px, ${point.y}px)`;
@@ -992,7 +999,7 @@ export default function MapView() {
       for (const marker of arPlacementMarkers.values()) {
         const hasAltitude = marker.altitude !== null && marker.altitude !== undefined;
         const groundElevation = getRenderedGroundElevation(marker.lng, marker.lat);
-        const elevation = hasAltitude ? marker.altitude : groundElevation;
+        const elevation = hasAltitude ? getRenderedAltitude(marker.altitude) : groundElevation;
         const point = projectAtElevation(map, marker.lng, marker.lat, elevation);
         marker.el.style.display = "";
         marker.el.style.transform = `translate(${point.x}px, ${point.y}px)`;
