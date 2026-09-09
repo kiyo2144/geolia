@@ -67,6 +67,69 @@ const GEOLOCATION_INITIAL_TIMEOUT_MS = 4000;
 const MIDDLE_BUTTON_ROTATE_SENSITIVITY = 0.3; // 1pxあたりの回転角度（度）
 const MIDDLE_BUTTON_PITCH_SENSITIVITY = 0.3; // 1pxあたりの傾き角度（度）
 
+// スマートフォンでの2本指ドラッグによる傾き操作は、2本指を縦に並べた状態だと
+// 正しく認識されないことがある（maplibre-glの内部的なジェスチャー判定の制約と見られ、
+// 外部から調整できる設定項目はない）。ジェスチャー操作自体はそのまま維持しつつ、
+// 指の向きに関係なく確実に傾きを調整できるボタンを地図上に追加する。
+const PITCH_BUTTON_STEP_DEG = 5; // 1回の押下・1ティックあたりの傾き変化量
+const PITCH_BUTTON_REPEAT_MS = 80; // 押し続けたときの変化間隔
+
+/** 地図の傾きをボタンで調整するためのmaplibre-glカスタムコントロール */
+class PitchControl {
+  onAdd(map) {
+    this._map = map;
+    this._intervalId = null;
+
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+
+    const makeButton = (label, ariaLabel, deltaDeg) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("aria-label", ariaLabel);
+      button.title = ariaLabel;
+      button.textContent = label;
+
+      const tick = () => {
+        const next = Math.min(Math.max(map.getPitch() + deltaDeg, 0), map.getMaxPitch());
+        map.setPitch(next);
+      };
+      const start = (event) => {
+        event.preventDefault();
+        this._stopRepeat();
+        tick();
+        this._intervalId = setInterval(tick, PITCH_BUTTON_REPEAT_MS);
+      };
+      const stop = () => this._stopRepeat();
+
+      button.addEventListener("pointerdown", start);
+      button.addEventListener("pointerup", stop);
+      button.addEventListener("pointerleave", stop);
+      button.addEventListener("pointercancel", stop);
+      return button;
+    };
+
+    container.appendChild(makeButton("⇗", "傾きを増やす", PITCH_BUTTON_STEP_DEG));
+    container.appendChild(makeButton("⇘", "傾きを減らす", -PITCH_BUTTON_STEP_DEG));
+
+    this._container = container;
+    return container;
+  }
+
+  _stopRepeat() {
+    if (this._intervalId !== null) {
+      clearInterval(this._intervalId);
+      this._intervalId = null;
+    }
+  }
+
+  onRemove() {
+    this._stopRepeat();
+    this._container.remove();
+    this._map = undefined;
+  }
+}
+
 // 平泉町の森林簿・地籍データの実際の範囲（南西・北東の緯度経度）。
 // forest_parcels / land_parcels 全件のジオメトリから算出した実測値。
 const HIRAIZUMI_DATA_BOUNDS = [
@@ -732,6 +795,7 @@ export default function MapView() {
       new NavigationControl({ visualizePitch: true, showCompass: true }),
       "top-right",
     );
+    map.addControl(new PitchControl(), "top-right");
     map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
 
     // マップエクスポート機能の「矩形選択」用オーバーレイのソースID
@@ -1381,7 +1445,7 @@ export default function MapView() {
 
         <p className={styles.hint}>
           {isTouchDevice
-            ? "1本指ドラッグ: パン / 2本指ピンチ: ズーム / 2本指のひねり・上下ドラッグ: 回転・傾き / タップ: 区画情報"
+            ? "1本指ドラッグ: パン / 2本指ピンチ: ズーム / 2本指のひねり・上下ドラッグ: 回転・傾き（右上のボタンでも傾き調整可） / タップ: 区画情報"
             : "左ドラッグ: パン / 右ドラッグ・Ctrl+ドラッグ・ホイールクリック+ドラッグ（MacBookは2本指クリック+ドラッグ）: 回転・傾き / ホイール: ズーム / クリック: 区画情報"}
         </p>
 
