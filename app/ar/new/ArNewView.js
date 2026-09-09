@@ -721,7 +721,7 @@ export function ArNewView() {
 
                     {isAdjustMode && (
                       <p className={styles.adjustHint}>
-                        2本指ひねりで回転 ・ 2本指を上下にスライドで上下移動 ・ ピンチで拡大縮小
+                        1本指スワイプで回転（フリックで慣性あり） ・ 2本指を上下にスライドで上下移動 ・ ピンチで拡大縮小
                       </p>
                     )}
 
