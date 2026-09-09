@@ -13,12 +13,6 @@ import { localMetersToLatLng } from "../../_shared/lib/geoMath";
 import { PlacementLocationMap } from "../../_shared/components/PlacementLocationMap";
 import styles from "./ArNewView.module.css";
 
-const STEPS = [
-  { id: "upload", label: "① データ選択" },
-  { id: "ar", label: "② AR配置" },
-  { id: "confirm", label: "③ 確認・保存" },
-];
-
 // x/z(水平位置)は「狙い撃ち配置」で決まるため、微調整では上下移動・回転・拡大縮小のみ扱う
 const DEFAULT_ADJUSTMENT = { y: 0, rotationX: 0, rotationY: 0, scale: 1 };
 
@@ -26,6 +20,12 @@ const DEFAULT_ADJUSTMENT = { y: 0, rotationX: 0, rotationY: 0, scale: 1 };
 const VERTICAL_METERS_PER_PIXEL = 0.01;
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 50;
+
+// 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
+// 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
+const GESTURE_SENSITIVITY_MULTIPLIERS = { image: 2.5, gif: 2.5 };
+const getGestureSensitivityMultiplier = (dataFormat) =>
+  GESTURE_SENSITIVITY_MULTIPLIERS[dataFormat] ?? 1;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -100,6 +100,10 @@ export function ArNewView() {
   const [dataFile, setDataFile] = useState(null);
   const [fileError, setFileError] = useState(null);
   const [placement, setPlacement] = useState(null); // { lat, lng, altitude }
+  // アンカー（配置）確定時点の自己位置のスナップショット。確定後はGPSの更新を
+  // 反映せずこれを使い続けることで、GPSの揺れでアンカーが動いて見えるのを防ぐ
+  // （視覚トラッキングの代わりに、確定後は自己位置を凍結する簡易的な対策）。
+  const [frozenUserPosition, setFrozenUserPosition] = useState(null);
   const [adjustment, setAdjustment] = useState(DEFAULT_ADJUSTMENT);
   const [isAdjustMode, setIsAdjustMode] = useState(true);
   // 'aiming'(狙い撃ちで大まかな位置合わせ) | 'fine-tune'(回転・上下移動などの微調整)
@@ -134,8 +138,6 @@ export function ArNewView() {
   const aimPointRef = useRef({ east: 0, north: 0 });
   // プレビュー画像撮影用。ARScene側で生成されたcanvas要素への参照。
   const arCanvasRef = useRef(null);
-
-  const isConfirmReady = placement !== null;
 
   const dataFormat = useMemo(() => getDataFormat(dataFile), [dataFile]);
 
@@ -253,19 +255,18 @@ export function ArNewView() {
     setIsSaved(false);
   };
 
-  const handlePlaceHere = () => {
-    if (!geolocation.position) return;
-    const { lat, lng, altitude } = geolocation.position;
-    setPlacement({ lat, lng, altitude });
-    setAdjustment(DEFAULT_ADJUSTMENT);
-    setIsSaved(false);
-  };
-
   const handleStartAr = async () => {
     geolocation.start();
     // 既存の設置場所があっても、まずは狙い撃ちモード(画面中央固定)から始める
     setArSubMode("aiming");
     await Promise.all([cameraStream.start(), deviceOrientation.requestPermission()]);
+  };
+
+  // データ選択後の「ARの設置に進む」ボタン。位置情報の取得・カメラ・端末の向きの
+  // 許可要求をまとめて行い、そのままAR設置画面に遷移する。
+  const handleProceedToAr = () => {
+    setStep("ar");
+    handleStartAr();
   };
 
   const deviceHeading = useMemo(() => {
@@ -280,6 +281,7 @@ export function ArNewView() {
 
     const confirmedLatLng = localMetersToLatLng(geolocation.position, aimPointRef.current);
     setPlacement({ ...confirmedLatLng, altitude: geolocation.position.altitude });
+    setFrozenUserPosition(geolocation.position);
     setAdjustment(DEFAULT_ADJUSTMENT);
     setArSubMode("fine-tune");
     setIsSaved(false);
@@ -287,6 +289,9 @@ export function ArNewView() {
   };
 
   const handleBackToAiming = () => setArSubMode("aiming");
+
+  // 微調整が終わり、AR上の位置が決まったら投稿内容の入力画面に進む
+  const handleProceedToPost = () => setStep("post");
 
   const handleGestureModeChange = useCallback((mode) => {
     setActiveGesture(mode);
@@ -298,17 +303,25 @@ export function ArNewView() {
     setAdjustment((prev) => ({ ...prev, scale: clamp(prev.scale * ratio, MIN_SCALE, MAX_SCALE) }));
   }, []);
 
-  const handleRotate = useCallback((deltaRadians) => {
-    setGestureDirection(deltaRadians >= 0 ? 1 : -1);
-    setAdjustment((prev) => ({ ...prev, rotationY: prev.rotationY + deltaRadians }));
-  }, []);
+  const handleRotate = useCallback(
+    (deltaRadians) => {
+      const adjustedDelta = deltaRadians * getGestureSensitivityMultiplier(dataFormat);
+      setGestureDirection(adjustedDelta >= 0 ? 1 : -1);
+      setAdjustment((prev) => ({ ...prev, rotationY: prev.rotationY + adjustedDelta }));
+    },
+    [dataFormat],
+  );
 
-  const handleVertical = useCallback((deltaY) => {
-    // 画面上で指を上に動かす(deltaYが負)ほど、3Dデータを上に持ち上げる
-    const verticalDelta = -deltaY * VERTICAL_METERS_PER_PIXEL;
-    setGestureDirection(verticalDelta >= 0 ? 1 : -1);
-    setAdjustment((prev) => ({ ...prev, y: prev.y + verticalDelta }));
-  }, []);
+  const handleVertical = useCallback(
+    (deltaY) => {
+      // 画面上で指を上に動かす(deltaYが負)ほど、3Dデータを上に持ち上げる
+      const verticalDelta =
+        -deltaY * VERTICAL_METERS_PER_PIXEL * getGestureSensitivityMultiplier(dataFormat);
+      setGestureDirection(verticalDelta >= 0 ? 1 : -1);
+      setAdjustment((prev) => ({ ...prev, y: prev.y + verticalDelta }));
+    },
+    [dataFormat],
+  );
 
   const handleResetAdjustment = () => setAdjustment(DEFAULT_ADJUSTMENT);
 
@@ -438,11 +451,11 @@ export function ArNewView() {
       });
       if (placementError) throw placementError;
 
-      setSaveStatus("保存が完了しました");
+      setSaveStatus("シェアしました");
       setIsSaved(true);
     } catch (saveError) {
       console.error("AR配置の保存に失敗しました:", saveError);
-      setSaveStatus(`保存に失敗しました: ${saveError.message ?? "不明なエラー"}`);
+      setSaveStatus(`シェアに失敗しました: ${saveError.message ?? "不明なエラー"}`);
     } finally {
       setIsSaving(false);
     }
@@ -464,31 +477,13 @@ export function ArNewView() {
 
   return (
     <div className={styles.wrapper}>
-      <nav className={styles.tabs}>
-        {STEPS.map(({ id, label: tabLabel }) => {
-          const disabled = id === "confirm" && !isConfirmReady;
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`${styles.tab} ${step === id ? styles.tabActive : ""}`}
-              disabled={disabled}
-              onClick={() => setStep(id)}
-            >
-              {tabLabel}
-            </button>
-          );
-        })}
-      </nav>
-
       {step === "upload" && (
         <section className={styles.panel}>
           <h2>3Dデータ・メディアの配置</h2>
           <p>
             点群（.ply）、Gaussian Splat（.spz / .splat / .ksplat / .sog）、
             静止画・GIF（.jpg / .png / .webp / .gif）、VRoid Studioデータ（.vrm）
-            から選択してください。設置場所は「② AR配置」でカメラを見ながら決めます
-            （現在地をそのまま使う場合はここで先に記録することもできます）。
+            から選択してください。設置場所はこのあとカメラを見ながら決めます。
             ファイルを選択しない場合はデモ用の点群で動作確認できます。
           </p>
 
@@ -596,30 +591,10 @@ export function ArNewView() {
           )}
 
           <div className={styles.actions}>
-            <button type="button" onClick={() => geolocation.start()}>
-              位置情報の取得を開始
-            </button>
-            <button type="button" onClick={handlePlaceHere} disabled={!geolocation.position}>
-              現在地をこの3Dデータの設置場所にする
+            <button type="button" onClick={handleProceedToAr} disabled={!!fileError}>
+              ARの設置に進む
             </button>
           </div>
-
-          {geolocation.error && (
-            <p className={styles.error}>位置情報エラー: {geolocation.error.message}</p>
-          )}
-
-          {geolocation.position && (
-            <p className={styles.hint}>
-              現在地: {geolocation.position.lat.toFixed(6)}, {geolocation.position.lng.toFixed(6)}
-              （精度 約{Math.round(geolocation.position.accuracy)}m）
-            </p>
-          )}
-
-          {placement && (
-            <p className={`${styles.hint} ${styles.hintSuccess}`}>
-              設置場所を記録しました: {placement.lat.toFixed(6)}, {placement.lng.toFixed(6)}
-            </p>
-          )}
         </section>
       )}
 
@@ -633,7 +608,7 @@ export function ArNewView() {
             <>
               <ARScene
                 orientation={deviceOrientation.orientation}
-                userPosition={geolocation.position}
+                userPosition={frozenUserPosition ?? geolocation.position}
                 targetPosition={placement}
                 dataUrl={dataUrl}
                 dataFormat={dataFormat}
@@ -688,6 +663,9 @@ export function ArNewView() {
                       <button type="button" onClick={handleBackToAiming}>
                         大まかな位置合わせに戻る
                       </button>
+                      <button type="button" className={styles.isActive} onClick={handleProceedToPost}>
+                        次へ（投稿内容を入力）
+                      </button>
                     </div>
 
                     {isAdjustMode && (
@@ -737,11 +715,11 @@ export function ArNewView() {
         </section>
       )}
 
-      {step === "confirm" && (
+      {step === "post" && (
         <section className={`${styles.panel} ${styles.panelWide}`}>
           <div className={styles.confirmDetails}>
-            <h2>設置場所の確認・保存</h2>
-            <PlacementLocationMap userPosition={geolocation.position} targetPosition={placement} />
+            <h2>新規投稿</h2>
+            <PlacementLocationMap userPosition={frozenUserPosition ?? geolocation.position} targetPosition={placement} />
 
             {placement && (
               <p className={styles.hint}>
@@ -787,7 +765,7 @@ export function ArNewView() {
                   (dataFormat === "vrm" && motionSourceMode === "upload" && !motionFile)
                 }
               >
-                {isSaving ? "保存中..." : "保存する"}
+                {isSaving ? "シェア中..." : "シェア"}
               </button>
               {saveStatus && (
                 <span className={isSaved ? styles.saveStatusSuccess : styles.saveStatus}>

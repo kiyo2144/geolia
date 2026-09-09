@@ -30,6 +30,11 @@ const VIEW_EXIT_ANGLE_DEGREES = 75; // 詳細→簡易表示へ切り替わる�
 // 至近距離では、カメラの向きが多少ずれていても実物として見えることが多いため、
 // 角度によらず詳細表示の対象にする（要望により追加）。
 const NEAR_DISTANCE_METERS = 30;
+// AR配置の描画位置の計算に使う自己位置は、GPSの細かな揺れでAR配置が小刻みに動いて
+// 見えないよう、これ以上動いたときだけ更新する（AR設置画面の「アンカー確定後は
+// GPS更新で位置を上書きしない」と同じ考え方を、常時多数の配置を表示し続ける
+// AR閲覧画面向けに適用したもの。周辺データの再取得判定とは別に扱う）。
+const RENDER_POSITION_UPDATE_METERS = 3;
 
 export function ArViewView() {
   const supabase = useMemo(() => createClient(), []);
@@ -41,10 +46,25 @@ export function ArViewView() {
   const [fetchStatus, setFetchStatus] = useState("");
   const lastFetchPositionRef = useRef(null);
 
+  // 描画（AR配置のローカル座標計算）専用の、間引き済みの自己位置
+  const [renderPosition, setRenderPosition] = useState(null);
+  const renderPositionRef = useRef(null);
+
   const handleStart = async () => {
     geolocation.start();
     await Promise.all([cameraStream.start(), deviceOrientation.requestPermission()]);
   };
+
+  useEffect(() => {
+    const position = geolocation.position;
+    if (!position) return;
+
+    const previous = renderPositionRef.current;
+    if (!previous || haversineDistanceMeters(previous, position) >= RENDER_POSITION_UPDATE_METERS) {
+      renderPositionRef.current = position;
+      setRenderPosition(position);
+    }
+  }, [geolocation.position]);
 
   // 現在地が一定距離(REFETCH_DISTANCE_METERS)以上動いたら、周辺のAR配置を再取得する
   // （要件定義4.2.1章。位置自体の平滑化はuseGeolocation内で行われている）。
@@ -94,7 +114,7 @@ export function ArViewView() {
   // 各配置のローカル座標（現在地からの東西・南北・高度差）と、正面からの角度を求める
   // （純粋な計算のみ。詳細/簡易表示の振り分けはヒステリシスが必要なため別途行う）。
   const placementsRaw = useMemo(() => {
-    const userPosition = geolocation.position;
+    const userPosition = renderPosition;
     if (!userPosition) return [];
 
     const heading = deviceHeading ?? 0;
@@ -122,7 +142,7 @@ export function ArViewView() {
         angleDiff: circularDiffDegrees(bearing, heading),
       };
     });
-  }, [rawPlacements, geolocation.position, deviceHeading]);
+  }, [rawPlacements, renderPosition, deviceHeading]);
 
   // コンパスのノイズによる「視野内」判定のちらつきを抑えるヒステリシス。
   // 一度「詳細表示」になった配置は、より広い角度（VIEW_EXIT_ANGLE_DEGREES）を
