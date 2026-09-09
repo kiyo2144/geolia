@@ -358,32 +358,50 @@ function createGroundLineElements(svgRoot, color) {
   dot.setAttribute("stroke", "#ffffff");
   dot.setAttribute("stroke-width", "1.5");
   dot.style.display = "none";
+  dot.style.pointerEvents = "none";
+
+  // 点自体（半径4px）はタップ・クリックの的として小さすぎるため、見た目には出ない
+  // 少し大きめの当たり判定用の円を重ねる。
+  const hitArea = document.createElementNS(SVG_NS, "circle");
+  hitArea.setAttribute("r", "12");
+  hitArea.setAttribute("fill", "transparent");
+  hitArea.style.display = "none";
+  hitArea.style.pointerEvents = "none";
+  hitArea.style.cursor = "pointer";
 
   svgRoot.appendChild(line);
   svgRoot.appendChild(dot);
-  return { line, dot };
+  svgRoot.appendChild(hitArea);
+  return { line, dot, hitArea };
 }
 
 function updateGroundLine(elements, groundPoint, tipPoint) {
-  const { line, dot } = elements;
+  const { line, dot, hitArea } = elements;
   if (!groundPoint) {
     line.style.display = "none";
     dot.style.display = "none";
+    hitArea.style.display = "none";
+    hitArea.style.pointerEvents = "none";
     return;
   }
   line.style.display = "";
   dot.style.display = "";
+  hitArea.style.display = "";
+  hitArea.style.pointerEvents = "auto";
   line.setAttribute("x1", groundPoint.x);
   line.setAttribute("y1", groundPoint.y);
   line.setAttribute("x2", tipPoint.x);
   line.setAttribute("y2", tipPoint.y);
   dot.setAttribute("cx", groundPoint.x);
   dot.setAttribute("cy", groundPoint.y);
+  hitArea.setAttribute("cx", groundPoint.x);
+  hitArea.setAttribute("cy", groundPoint.y);
 }
 
 function removeGroundLine(elements) {
   elements.line.remove();
   elements.dot.remove();
+  elements.hitArea.remove();
 }
 
 export default function MapView() {
@@ -435,6 +453,8 @@ export default function MapView() {
   const arPlacementMarkersRef = useRef(new Map());
   const updateArPlacementMarkersRef = useRef(() => {});
   const arPlacementPopupRef = useRef(null);
+  // 高度接続線の地表面側の点をクリックしたときに、その地点の標高タイルの高度を表示する
+  const terrainElevationPopupRef = useRef(null);
 
   const [exportRangeMode, setExportRangeMode] = useState("current");
   const [exportBbox, setExportBbox] = useState(null);
@@ -559,6 +579,15 @@ export default function MapView() {
     }
   }, []);
 
+  // 高度接続線の地表面側の点がクリックされたときに、その地点の標高タイルの高度を表示する
+  const showTerrainElevationPopup = useCallback((map, lng, lat) => {
+    const elevation = elevationSamplerRef.current(lng, lat);
+    terrainElevationPopupRef.current
+      ?.setLngLat([lng, lat])
+      .setHTML(`<b>地形の標高</b><br>標高タイルの高度 約${Math.round(elevation)}m`)
+      .addTo(map);
+  }, []);
+
   // AR配置（ar_placements）を表示範囲内で取得し、ピン(DOM要素)として表示する。
   // 森林簿・地籍と同様に表示範囲(bbox)内のみを取得する。
   const refreshArPlacements = useCallback(async () => {
@@ -626,6 +655,10 @@ export default function MapView() {
       });
 
       const groundLine = createGroundLineElements(groundLinesSvgRef.current, AR_PLACEMENT_MARKER_COLOR);
+      groundLine.hitArea.addEventListener("click", (event) => {
+        event.stopPropagation();
+        showTerrainElevationPopup(map, lng, lat);
+      });
       markers.set(id, { el, lat, lng, altitude, properties: feature.properties, groundLine });
     }
 
@@ -638,7 +671,7 @@ export default function MapView() {
     }
 
     updateArPlacementMarkersRef.current();
-  }, [supabase]);
+  }, [supabase, showTerrainElevationPopup]);
 
   // 取得した位置情報（GeolocationCoordinates）をマーカー・ステータス表示に反映する。
   // 常時追跡（watchPosition）と「現在地へ移動」ボタン（getCurrentPosition）の
@@ -911,6 +944,13 @@ export default function MapView() {
     map.getCanvasContainer().appendChild(locationMarkerEl);
     locationMarkerElRef.current = locationMarkerEl;
     const locationGroundLine = createGroundLineElements(groundLinesSvg, LOCATION_MARKER_COLOR);
+    terrainElevationPopupRef.current = new Popup({ closeButton: true, closeOnClick: true });
+    locationGroundLine.hitArea.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const pos = locationPositionRef.current;
+      if (!pos) return;
+      showTerrainElevationPopup(map, pos.lng, pos.lat);
+    });
 
     // 実際にmaplibre-glが地形を描画する高さ（標高タイルの値 × 強調倍率。
     // 地形表現が無効なときは平面表示になるため0）に合わせる。
