@@ -11,6 +11,13 @@
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='29' height='29' viewBox='0 0 29 29'%3E%3Cpath fill='%23e63946' d='m10.5 14 4-8 4 8z'/%3E%3Cpath fill='%23ccc' d='m10.5 16 4 8 4-8z'/%3E%3C/svg%3E") !important;
 }
 
+/* ポップアップ（区画情報・現在地・AR配置）は常に白背景のため、ダークモードでは
+   body の --foreground（明色）が継承されて文字が薄く読みにくくなっていた。
+   背景色に関わらず読みやすいよう、文字色を明示的に固定する。 */
+.wrapper :global(.maplibregl-popup-content) {
+  color: #1a1a1a;
+}
+
 .sidePane {
   width: 280px;
   flex-shrink: 0;
