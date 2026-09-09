@@ -86,6 +86,16 @@ function getDataFormat(file) {
   return "ply";
 }
 
+// @sparkjsdev/spark の SplatFileType（文字列）に対応する拡張子ごとの値。
+// アップロード直後のプレビューは拡張子の無い一時URL（blob:）を使うため、
+// url任せの自動判別に頼らずこちらを明示的に渡す（詳細はSplatObject.jsのコメント参照）。
+const SPLAT_FILE_TYPE_BY_EXTENSION = {
+  spz: "spz",
+  splat: "splat",
+  ksplat: "ksplat",
+  sog: "pcsogs",
+};
+
 function getAssetType(dataFormat) {
   if (dataFormat === "splat") return "gaussian_splat";
   if (dataFormat === "image" || dataFormat === "gif") return "image";
@@ -140,6 +150,10 @@ export function ArNewView() {
   const arCanvasRef = useRef(null);
 
   const dataFormat = useMemo(() => getDataFormat(dataFile), [dataFile]);
+  const splatFileType = useMemo(
+    () => (dataFormat === "splat" ? SPLAT_FILE_TYPE_BY_EXTENSION[getFileFormat(dataFile)] : undefined),
+    [dataFormat, dataFile],
+  );
 
   // アップロードされたファイルから three.js / Spark が読める一時URLを作る
   const dataUrl = useMemo(() => (dataFile ? URL.createObjectURL(dataFile) : null), [dataFile]);
@@ -255,19 +269,31 @@ export function ArNewView() {
     setIsSaved(false);
   };
 
+  // 位置情報・カメラ・端末の向きの許可要求をまとめて行う（「ARを開始」ボタンからの
+  // 再試行時にも使うため、狙い撃ち/微調整のどちらから始めるかはここでは変更しない）。
   const handleStartAr = async () => {
     geolocation.start();
-    // 既存の設置場所があっても、まずは狙い撃ちモード(画面中央固定)から始める
-    setArSubMode("aiming");
     await Promise.all([cameraStream.start(), deviceOrientation.requestPermission()]);
   };
 
   // データ選択後の「ARの設置に進む」ボタン。位置情報の取得・カメラ・端末の向きの
   // 許可要求をまとめて行い、そのままAR設置画面に遷移する。
   const handleProceedToAr = () => {
+    setArSubMode("aiming");
     setStep("ar");
     handleStartAr();
   };
+
+  // 「新規投稿」画面から戻るボタン。既に設置場所が決まっていれば微調整から、
+  // まだ決まっていなければ狙い撃ちから再開する。
+  const handleBackToAr = () => {
+    setArSubMode(placement ? "fine-tune" : "aiming");
+    setStep("ar");
+    handleStartAr();
+  };
+
+  // AR設置画面から戻るボタン。データ選択画面に戻る。
+  const handleBackToUpload = () => setStep("upload");
 
   const deviceHeading = useMemo(() => {
     if (!deviceOrientation.orientation) return null;
@@ -604,6 +630,10 @@ export function ArNewView() {
               まだ存在しないとストリームを紐付けられず、映像が真っ黒になるため。 */}
           <CameraBackground videoRef={cameraStream.videoRef} />
 
+          <button type="button" className={styles.backButton} onClick={handleBackToUpload}>
+            ← 戻る
+          </button>
+
           {cameraStream.isActive && (
             <>
               <ARScene
@@ -612,6 +642,7 @@ export function ArNewView() {
                 targetPosition={placement}
                 dataUrl={dataUrl}
                 dataFormat={dataFormat}
+                splatFileType={splatFileType}
                 adjustment={adjustment}
                 arSubMode={arSubMode}
                 aimPointRef={aimPointRef}
@@ -718,6 +749,9 @@ export function ArNewView() {
       {step === "post" && (
         <section className={`${styles.panel} ${styles.panelWide}`}>
           <div className={styles.confirmDetails}>
+            <button type="button" className={styles.backLink} onClick={handleBackToAr}>
+              ← 戻る
+            </button>
             <h2>新規投稿</h2>
             <PlacementLocationMap userPosition={frozenUserPosition ?? geolocation.position} targetPosition={placement} />
 

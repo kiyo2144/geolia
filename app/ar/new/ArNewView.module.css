@@ -93,6 +93,30 @@
   overflow: hidden;
 }
 
+.backButton {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 7;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(13, 17, 23, 0.75);
+  color: #f0f3f7;
+  font-size: 0.8rem;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.backLink {
+  padding: 0.4rem 0;
+  border: none;
+  background: none;
+  color: #58a6ff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
 .panelOverlay {
   position: absolute;
   inset: 0;

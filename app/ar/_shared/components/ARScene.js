@@ -167,6 +167,7 @@ export function ARScene({
   targetPosition,
   dataUrl,
   dataFormat,
+  splatFileType,
   adjustment,
   arSubMode,
   aimPointRef,
@@ -182,7 +183,9 @@ export function ARScene({
 }) {
   const content = (
     <>
-      {dataUrl && dataFormat === "splat" && <SplatObject url={dataUrl} onLoaded={onSplatLoaded} />}
+      {dataUrl && dataFormat === "splat" && (
+        <SplatObject url={dataUrl} fileType={splatFileType} onLoaded={onSplatLoaded} />
+      )}
       {dataUrl && dataFormat === "ply" && (
         <PointCloudObject url={dataUrl} onVertexColorDetected={onVertexColorDetected} />
       )}
