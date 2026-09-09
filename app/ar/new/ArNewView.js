@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ARScene } from "../_shared/components/ARScene";
 import { CameraBackground } from "../_shared/components/CameraBackground";
@@ -75,15 +76,19 @@ function getFileFormat(file) {
   return match ? match[1] : null;
 }
 
-// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIF・VRMのどれとして読むかを判定する
+// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIF・VRMのどれとして読むかを判定する。
+// iOSの「ファイル」アプリでは、拡張子だけの独自フォーマット（.spz等）が選択できない
+// （グレーアウトする）ことがあるため、accept属性を汎用バイナリにも広げて選択自体は
+// できるようにしている。その分、ここで対応拡張子かどうかを厳密にチェックする。
 function getDataFormat(file) {
   const format = getFileFormat(file);
   if (!format) return null;
+  if (format === "ply") return "ply";
   if (SPLAT_EXTENSIONS.includes(format)) return "splat";
   if (format === "gif") return "gif";
   if (format === "vrm") return "vrm";
   if (IMAGE_EXTENSIONS.includes(format)) return "image";
-  return "ply";
+  return null;
 }
 
 // @sparkjsdev/spark の SplatFileType（文字列）に対応する拡張子ごとの値。
@@ -105,6 +110,7 @@ function getAssetType(dataFormat) {
 
 export function ArNewView() {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
 
   const [step, setStep] = useState("upload");
   const [dataFile, setDataFile] = useState(null);
@@ -222,6 +228,13 @@ export function ArNewView() {
     const file = event.target.files?.[0] ?? null;
     if (file) {
       const format = getDataFormat(file);
+      if (!format) {
+        setFileError("対応していないファイル形式です");
+        setDataFile(null);
+        setColorInfo(null);
+        event.target.value = "";
+        return;
+      }
       const limitBytes = FILE_SIZE_LIMITS_BYTES[format];
       if (file.size > limitBytes) {
         setFileError(
@@ -479,6 +492,8 @@ export function ArNewView() {
 
       setSaveStatus("シェアしました");
       setIsSaved(true);
+      // 「シェアしました」を一瞬表示してからAR閲覧画面に遷移する
+      setTimeout(() => router.push("/ar/view"), 1000);
     } catch (saveError) {
       console.error("AR配置の保存に失敗しました:", saveError);
       setSaveStatus(`シェアに失敗しました: ${saveError.message ?? "不明なエラー"}`);
@@ -499,6 +514,7 @@ export function ArNewView() {
     motionPresetKey,
     motionFile,
     supabase,
+    router,
   ]);
 
   return (
@@ -517,7 +533,11 @@ export function ArNewView() {
             データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif / .vrm)
             <input
               type="file"
-              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm"
+              // iOSの「ファイル」アプリは、.spz等の独自拡張子だけを指定すると
+              // ファイルをグレーアウトして選択できないことがあるため、
+              // 汎用バイナリのMIMEタイプ（application/octet-stream）も加えて
+              // 選択自体は常にできるようにしている（実際の対応判定はJS側で行う）。
+              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm,application/octet-stream"
               onChange={handleFileChange}
             />
           </label>
