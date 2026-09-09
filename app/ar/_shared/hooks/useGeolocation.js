@@ -7,7 +7,11 @@ import { haversineDistanceMeters } from "../../../_shared/lib/geoMath";
 const MAX_ACCURACY_METERS = 30; // 精度ゲート: これを超える誤差半径のfixは採用しない
 const MAX_WALK_SPEED_MPS = 3; // 外れ値検知: 徒歩を想定した最大移動速度
 const POSITION_EMA_ALPHA = 0.25; // 平滑化係数
-const POSITION_UPDATE_THRESHOLD_METERS = 0.5; // 描画更新の間引き
+// 描画更新の間引き。AR閲覧画面は歩いてAR配置の周りを回り込む体験のため、
+// 間引きが粗いと少し動いただけでは表示が追従せず「画面に張り付いている」ように
+// 感じられる（実機検証で判明）。AR設置側は設置確定後は自己位置を固定して使う
+// ため、この値を小さくしてもワープ防止への影響はない。
+const POSITION_UPDATE_THRESHOLD_METERS = 0.2;
 
 /**
  * 現在地を取得・継続監視するフック。
