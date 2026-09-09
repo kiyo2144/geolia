@@ -4,6 +4,13 @@
   position: relative;
 }
 
+/* コンパスアイコンが白黒で分かりにくいため、北を指す側を現在地マーカーと同じ赤に変更する
+   （maplibre-glの既定アイコンは灰色の針のみで、明暗テーマ用に複数の背景画像が定義されている
+   ため、!importantで確実に上書きする） */
+.wrapper :global(.maplibregl-ctrl-compass .maplibregl-ctrl-icon) {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='29' height='29' viewBox='0 0 29 29'%3E%3Cpath fill='%23e63946' d='m10.5 14 4-8 4 8z'/%3E%3Cpath fill='%23ccc' d='m10.5 16 4 8 4-8z'/%3E%3C/svg%3E") !important;
+}
+
 .sidePane {
   width: 280px;
   flex-shrink: 0;
