@@ -67,24 +67,28 @@ export function ImagePlaneObject({ url, decorationPresetKey, imageEffectKey }) {
   useEffect(() => {
     let cancelled = false;
 
-    // スマートフォンのカメラで撮影した写真はEXIFに「向き」情報が付いていることが多く、
-    // 単純な<img>読み込みだとブラウザ・OSによって補正の有無が一貫しない（上下逆に
-    // 表示されることがある）。createImageBitmapにimageOrientation: "from-image"を
-    // 明示することで、EXIFの向きを常に正しく反映させる。
-    fetch(url)
-      .then((response) => response.blob())
-      .then((blob) => createImageBitmap(blob, { imageOrientation: "from-image" }))
-      .then((image) => {
-        if (cancelled) return;
-        const canvas = buildFramedCanvas(image, decorationPresetKey);
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        setTexture(tex);
-        setAspect(canvas.width / canvas.height);
-      })
-      .catch((error) => {
-        console.error("画像の読み込みに失敗しました:", error);
-      });
+    // <img>によるデコードはEXIFの向き情報を常に自動反映する（主要ブラウザ共通の
+    // 挙動）。createImageBitmapは環境によってimageOrientationオプションの扱いが
+    // 一貫しない（常に補正される場合／されない場合がある）ため使用しない。
+    // crossOriginを指定しないと、Supabase Storageの公開URL（別オリジン）から
+    // 読み込んだ画像をcanvasに描画した時点でcanvasがCORS汚染され、それを
+    // WebGLテクスチャ化しようとした際にSecurityErrorで失敗し何も表示されなくなる
+    // （同一オリジンのblob: URL、つまり設置直後のプレビュー中は問題が起きないため
+    // 見つかりにくい）。
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      if (cancelled) return;
+      const canvas = buildFramedCanvas(image, decorationPresetKey);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      setTexture(tex);
+      setAspect(canvas.width / canvas.height);
+    };
+    image.onerror = () => {
+      console.error("画像の読み込みに失敗しました:", url);
+    };
+    image.src = url;
 
     return () => {
       cancelled = true;
