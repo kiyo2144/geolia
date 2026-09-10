@@ -75,15 +75,38 @@ function useDeviceHeading() {
 
 /**
  * 一人称視点画面の右上に表示する、OpenStreetMapベースの平面サブマップ。
- * 現在地・向きの表示に加え、スクロール／バーでの拡大縮小、パネル自体のリサイズ、
- * クリックによる瞬間移動、方角アイコン（＋対応端末ではコンパスセンサーの向き）に対応する。
+ * 現在地・向きの表示に加え、スクロール／バーでの拡大縮小、ボタンによる表示サイズの
+ * 切り替え（デフォルト／約4倍）、クリックによる瞬間移動、方角アイコン
+ * （＋対応端末ではコンパスセンサーの向き）に対応する。
  */
-export function FirstPersonMinimap({ origin, project, placements, boundsMeters, playerStateRef, teleportRequestRef }) {
+export function FirstPersonMinimap({
+  origin,
+  project,
+  placements,
+  boundsMeters,
+  playerStateRef,
+  teleportRequestRef,
+  placementPickActive,
+  onPlacementPick,
+  pickedLngLat,
+}) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const playerMarkerRef = useRef(null);
+  const pickedMarkerRef = useRef(null);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [isEnlarged, setIsEnlarged] = useState(false);
   const { heading, needsPermission, requestPermission } = useDeviceHeading();
+
+  // クリック時のハンドラは初回マウント時にのみ登録するため、最新の値をrefで参照する
+  const placementPickActiveRef = useRef(placementPickActive);
+  useEffect(() => {
+    placementPickActiveRef.current = placementPickActive;
+  }, [placementPickActive]);
+  const onPlacementPickRef = useRef(onPlacementPick);
+  useEffect(() => {
+    onPlacementPickRef.current = onPlacementPick;
+  }, [onPlacementPick]);
 
   useEffect(() => {
     const map = new maplibregl.Map({
@@ -122,6 +145,10 @@ export function FirstPersonMinimap({ origin, project, placements, boundsMeters, 
 
     const handleClick = (event) => {
       const { lng, lat } = event.lngLat;
+      if (placementPickActiveRef.current) {
+        onPlacementPickRef.current?.({ lng, lat });
+        return;
+      }
       const { x, y: northMeters } = project(lng, lat);
       teleportRequestRef.current = {
         x: clamp(x, -boundsMeters, boundsMeters),
@@ -156,6 +183,28 @@ export function FirstPersonMinimap({ origin, project, placements, boundsMeters, 
     };
   }, [placements]);
 
+  // AR設置でサブマップクリックにより選んだ候補地点のマーカー
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return undefined;
+    if (!pickedLngLat) {
+      pickedMarkerRef.current?.remove();
+      pickedMarkerRef.current = null;
+      return undefined;
+    }
+    if (!pickedMarkerRef.current) {
+      const el = document.createElement("div");
+      el.className = styles.pickedMarker;
+      pickedMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([
+        pickedLngLat.lng,
+        pickedLngLat.lat,
+      ]);
+      pickedMarkerRef.current.addTo(map);
+    } else {
+      pickedMarkerRef.current.setLngLat([pickedLngLat.lng, pickedLngLat.lat]);
+    }
+  }, [pickedLngLat]);
+
   // 現在地・向きの表示を定期的に更新する（毎フレームではなく間引いて負荷を抑える）
   useEffect(() => {
     const interval = setInterval(() => {
@@ -169,7 +218,8 @@ export function FirstPersonMinimap({ origin, project, placements, boundsMeters, 
     return () => clearInterval(interval);
   }, [project, playerStateRef]);
 
-  // パネル自体のリサイズ（右下のハンドルでドラッグ）に地図の描画サイズを追従させる
+  // サイズ切り替え（デフォルト／約4倍）でパネルのCSSサイズが変わった際に、
+  // 地図の描画サイズを追従させる
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === "undefined") return undefined;
@@ -182,7 +232,10 @@ export function FirstPersonMinimap({ origin, project, placements, boundsMeters, 
 
   return (
     <div className={styles.wrapper}>
-      <div ref={containerRef} className={styles.mapContainer} />
+      <div
+        ref={containerRef}
+        className={`${styles.mapContainer} ${isEnlarged ? styles.mapContainerLarge : ""}`}
+      />
 
       <div className={styles.compassBadge}>
         <span>N</span>
@@ -190,6 +243,14 @@ export function FirstPersonMinimap({ origin, project, placements, boundsMeters, 
           <div className={styles.compassNeedle} style={{ transform: `translateX(-50%) rotate(${-heading}deg)` }} />
         )}
       </div>
+
+      <button
+        type="button"
+        className={styles.sizeToggleButton}
+        onClick={() => setIsEnlarged((current) => !current)}
+      >
+        {isEnlarged ? "縮小" : "拡大"}
+      </button>
 
       {needsPermission && (
         <button type="button" className={styles.compassPermissionButton} onClick={requestPermission}>
@@ -208,7 +269,9 @@ export function FirstPersonMinimap({ origin, project, placements, boundsMeters, 
         aria-label="サブマップの拡大縮小"
       />
 
-      <p className={styles.hintText}>クリックでその場所へ移動</p>
+      <p className={styles.hintText}>
+        {placementPickActive ? "クリックでAR設置位置を選択" : "クリックでその場所へ移動"}
+      </p>
     </div>
   );
 }

@@ -14,6 +14,16 @@ import { useGeolocation } from "../_shared/hooks/useGeolocation";
 import { localMetersToLatLng } from "../../_shared/lib/geoMath";
 import { PlacementLocationMap } from "../../_shared/components/PlacementLocationMap";
 import { createElevationSampler } from "../../map/mapMeshBuilders";
+import {
+  DECORATION_OPTIONS,
+  FILE_SIZE_LIMITS_BYTES,
+  FILE_SIZE_LIMIT_LABELS,
+  getDataFormat,
+  getFileFormat,
+  IMAGE_EFFECT_OPTIONS,
+  SPLAT_FILE_TYPE_BY_EXTENSION,
+} from "../_shared/lib/dataFormat";
+import { saveArPlacement } from "../_shared/lib/saveArPlacement";
 import styles from "./ArNewView.module.css";
 
 // 標高タイルサンプラーを取得する範囲（度）。DEM_TILE_ZOOMのタイル1枚で十分覆える広さ。
@@ -39,18 +49,6 @@ const getGestureSensitivityMultiplier = (dataFormat) =>
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-// 画像・GIF用の装飾フレーム／エフェクトの初期セット（要件定義 docs/requirements.md 4.1.3章）
-const DECORATION_OPTIONS = [
-  { value: "none", label: "なし" },
-  { value: "white", label: "シンプル白枠" },
-  { value: "polaroid", label: "ポラロイド風" },
-];
-const IMAGE_EFFECT_OPTIONS = [
-  { value: "none", label: "なし" },
-  { value: "sparkle", label: "キラキラ" },
-  { value: "heart", label: "ハート" },
-  { value: "confetti", label: "紙吹雪" },
-];
 // VRM定型モーションの初期セット（要件定義 docs/requirements.md 4.1.3章）
 const MOTION_PRESET_OPTIONS = [
   { value: "idle", label: "待機" },
@@ -59,63 +57,8 @@ const MOTION_PRESET_OPTIONS = [
   { value: "jump", label: "ジャンプ" },
 ];
 
-// 対応データ種別ごとのファイルサイズ上限（要件定義 docs/requirements.md 4.1.4章）
-const SPLAT_EXTENSIONS = ["spz", "splat", "ksplat", "sog"];
-const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
-const FILE_SIZE_LIMITS_BYTES = {
-  ply: 100 * 1024 * 1024,
-  splat: 50 * 1024 * 1024,
-  image: 20 * 1024 * 1024,
-  gif: 20 * 1024 * 1024,
-  vrm: 50 * 1024 * 1024,
-};
-const FILE_SIZE_LIMIT_LABELS = {
-  ply: "100MB",
-  splat: "50MB",
-  image: "20MB",
-  gif: "20MB",
-  vrm: "50MB",
-};
 const MOTION_FILE_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
 const MOTION_FILE_SIZE_LIMIT_LABEL = "10MB";
-
-function getFileFormat(file) {
-  if (!file) return null;
-  const match = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
-  return match ? match[1] : null;
-}
-
-// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIF・VRMのどれとして読むかを判定する。
-// iOSの「ファイル」アプリでは、拡張子だけの独自フォーマット（.spz等）が選択できない
-// （グレーアウトする）ことがあるため、accept属性を汎用バイナリにも広げて選択自体は
-// できるようにしている。その分、ここで対応拡張子かどうかを厳密にチェックする。
-function getDataFormat(file) {
-  const format = getFileFormat(file);
-  if (!format) return null;
-  if (format === "ply") return "ply";
-  if (SPLAT_EXTENSIONS.includes(format)) return "splat";
-  if (format === "gif") return "gif";
-  if (format === "vrm") return "vrm";
-  if (IMAGE_EXTENSIONS.includes(format)) return "image";
-  return null;
-}
-
-// @sparkjsdev/spark の SplatFileType（文字列）に対応する拡張子ごとの値。
-// アップロード直後のプレビューは拡張子の無い一時URL（blob:）を使うため、
-// url任せの自動判別に頼らずこちらを明示的に渡す（詳細はSplatObject.jsのコメント参照）。
-const SPLAT_FILE_TYPE_BY_EXTENSION = {
-  spz: "spz",
-  splat: "splat",
-  ksplat: "ksplat",
-  sog: "pcsogs",
-};
-
-function getAssetType(dataFormat) {
-  if (dataFormat === "splat") return "gaussian_splat";
-  if (dataFormat === "image" || dataFormat === "gif") return "image";
-  if (dataFormat === "vrm") return "vrm";
-  return "point_cloud";
-}
 
 export function ArNewView() {
   const supabase = useMemo(() => createClient(), []);
@@ -451,91 +394,26 @@ export function ArNewView() {
     setLabelError(false);
 
     setIsSaving(true);
-    setSaveStatus("アップロード中...");
     try {
-      const format = getFileFormat(dataFile);
-      const storagePath = `${crypto.randomUUID()}.${format}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("ar-assets")
-        .upload(storagePath, dataFile, {
-          contentType: dataFile.type || "application/octet-stream",
-        });
-      if (uploadError) throw uploadError;
-
-      // プレビュー画像は無くても配置の保存自体は継続する（あくまで補助的な情報のため）
-      let previewStoragePath = null;
-      if (previewBlob) {
-        const previewPath = `${crypto.randomUUID()}-preview.jpg`;
-        const { error: previewUploadError } = await supabase.storage
-          .from("ar-assets")
-          .upload(previewPath, previewBlob, { contentType: "image/jpeg" });
-        if (previewUploadError) {
-          console.error("プレビュー画像のアップロードに失敗しました:", previewUploadError);
-        } else {
-          previewStoragePath = previewPath;
-        }
-      }
-
-      // VRM用: モーションファイルがアップロードされていれば、専用バケット・テーブルに登録する
-      let motionAssetId = null;
-      if (dataFormat === "vrm" && motionSourceMode === "upload" && motionFile) {
-        setSaveStatus("モーションファイルをアップロード中...");
-        const motionStoragePath = `${crypto.randomUUID()}.vrma`;
-        const { error: motionUploadError } = await supabase.storage
-          .from("ar-motion-assets")
-          .upload(motionStoragePath, motionFile, {
-            contentType: motionFile.type || "application/octet-stream",
-          });
-        if (motionUploadError) throw motionUploadError;
-
-        const { data: motionAssetRow, error: motionAssetError } = await supabase
-          .from("ar_motion_assets")
-          .insert({
-            storage_path: motionStoragePath,
-            original_filename: motionFile.name,
-            format: "vrma",
-          })
-          .select()
-          .single();
-        if (motionAssetError) throw motionAssetError;
-        motionAssetId = motionAssetRow.id;
-      }
-
-      setSaveStatus("データを登録中...");
-      const { data: assetRow, error: assetError } = await supabase
-        .from("ar_data_assets")
-        .insert({
-          asset_type: getAssetType(dataFormat),
-          storage_path: storagePath,
-          original_filename: dataFile.name,
-          format,
-          file_size_bytes: dataFile.size,
-        })
-        .select()
-        .single();
-      if (assetError) throw assetError;
-
-      setSaveStatus("配置情報を保存中...");
-      const { error: placementError } = await supabase.from("ar_placements").insert({
-        data_asset_id: assetRow.id,
-        label: label.trim(),
+      await saveArPlacement(supabase, {
+        dataFile,
+        dataFormat,
+        label,
         lat: placement.lat,
         lng: placement.lng,
         altitude: finalAltitude,
-        rotation_x: adjustment.rotationX,
-        rotation_y: adjustment.rotationY,
+        rotationX: adjustment.rotationX,
+        rotationY: adjustment.rotationY,
         scale: adjustment.scale,
-        vertical_offset: adjustment.y,
-        preview_storage_path: previewStoragePath,
-        decoration_preset_key:
-          dataFormat === "image" || dataFormat === "gif" ? decorationPresetKey : null,
-        image_effect_key: dataFormat === "image" || dataFormat === "gif" ? imageEffectKey : null,
-        motion_preset_key:
-          dataFormat === "vrm" && motionSourceMode === "preset" ? motionPresetKey : null,
-        motion_asset_id: dataFormat === "vrm" && motionSourceMode === "upload" ? motionAssetId : null,
+        verticalOffset: adjustment.y,
+        previewBlob,
+        decorationPresetKey,
+        imageEffectKey,
+        motionSourceMode,
+        motionPresetKey,
+        motionFile,
+        onStatus: setSaveStatus,
       });
-      if (placementError) throw placementError;
 
       setSaveStatus("シェアしました");
       setIsSaved(true);

@@ -10,7 +10,7 @@ import styles from "./MapView.module.css";
 
 // v6は最新すぎてバンドラー環境でのWorker解決やfill-extrusion描画に問題があったため、
 // map_overlay.html（既存プロトタイプ）でも実績のあるv4.7.1系を使用する。
-const { Map: MapLibreMap, NavigationControl, ScaleControl, Popup } = maplibregl;
+const { Map: MapLibreMap, NavigationControl, ScaleControl, Popup, Marker } = maplibregl;
 
 const GSI_ATTRIBUTION =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener noreferrer">地理院タイル</a>';
@@ -190,6 +190,23 @@ const LOCATION_MARKER_COLOR = "#e63946";
 
 // AR配置ピンの色。現在地マーカーと区別できるよう別の色にする。
 const AR_PLACEMENT_MARKER_COLOR = "#8e44ad";
+
+// 一人称視点の開始地点ピンの色。
+const FIRST_PERSON_MARKER_COLOR = "#2b6cff";
+
+// 一人称視点の開始地点ピン用のシンプルなSVGマーカー要素を作る。
+// createPinMarkerElement()とは違い、maplibregl.Markerに直接渡して位置管理を
+// 任せる（地形の起伏を考慮した独自の投影計算をする現在地・AR配置ピンとは異なり、
+// クリックした地点そのものを示すだけなので、それで十分なため）。
+function createFirstPersonPinElement(color) {
+  const el = document.createElement("div");
+  el.innerHTML =
+    '<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">' +
+    `<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>` +
+    '<circle cx="14" cy="12" r="4.2" fill="#ffffff"/>' +
+    "</svg>";
+  return el;
+}
 
 // OSM建物データの色（実測の高さが無いものが大半のため、単色の落ち着いた色にする）。
 // 「建物」という汎用名ではなく固有の名称（OSMのnameタグ）が付いているものは
@@ -511,14 +528,60 @@ export default function MapView() {
     selectionModeRef.current = isSelectingRectangle;
   }, [isSelectingRectangle]);
 
-  // 一人称視点で確認する機能。トグルをオンにした状態で地図をクリックすると、
-  // その地点を起点に一人称ビュー（FirstPersonView）を起動する。
-  const [firstPersonModeActive, setFirstPersonModeActive] = useState(false);
-  const firstPersonModeActiveRef = useRef(firstPersonModeActive);
-  useEffect(() => {
-    firstPersonModeActiveRef.current = firstPersonModeActive;
-  }, [firstPersonModeActive]);
+  // 一人称視点で確認する機能。森林簿・地籍・建物のいずれも無い場所を地図上で
+  // クリックすると、その地点にピンを立てる（まだ起動はしない）。ピンが立った状態で
+  // 「一人称視点で確認」ボタン（地図上のポップアップ）を押すと、その地点を起点に
+  // 一人称ビュー（FirstPersonView）を起動する。
+  const [firstPersonPendingOrigin, setFirstPersonPendingOrigin] = useState(null);
+  const firstPersonMarkerRef = useRef(null);
   const [firstPersonOrigin, setFirstPersonOrigin] = useState(null);
+
+  // ピンが立っている間、地図上に「一人称視点で確認」「キャンセル」ボタン付きの
+  // ポップアップを表示する。closeButtonは使わず（マーカー削除時にもcloseイベントが
+  // 発火し、Reactの状態更新と競合するため）、ボタンで明示的にキャンセルさせる。
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !firstPersonPendingOrigin) {
+      firstPersonMarkerRef.current?.remove();
+      firstPersonMarkerRef.current = null;
+      return undefined;
+    }
+
+    const popupContent = document.createElement("div");
+    popupContent.className = styles.firstPersonPopup;
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.textContent = "一人称視点で確認";
+    confirmButton.addEventListener("click", () => {
+      setFirstPersonOrigin(firstPersonPendingOrigin);
+      setFirstPersonPendingOrigin(null);
+    });
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = "キャンセル";
+    cancelButton.addEventListener("click", () => {
+      setFirstPersonPendingOrigin(null);
+    });
+    popupContent.appendChild(confirmButton);
+    popupContent.appendChild(cancelButton);
+
+    const popup = new Popup({ closeButton: false, closeOnClick: false, offset: 20 }).setDOMContent(
+      popupContent,
+    );
+    const marker = new Marker({
+      element: createFirstPersonPinElement(FIRST_PERSON_MARKER_COLOR),
+      anchor: "bottom",
+    })
+      .setLngLat([firstPersonPendingOrigin.lng, firstPersonPendingOrigin.lat])
+      .setPopup(popup)
+      .addTo(map);
+    marker.togglePopup();
+    firstPersonMarkerRef.current = marker;
+
+    return () => {
+      marker.remove();
+    };
+  }, [firstPersonPendingOrigin]);
 
   const latestFlagsRef = useRef({ forestVisible, landVisible, buildingsVisible });
   useEffect(() => {
@@ -927,12 +990,6 @@ export default function MapView() {
 
     const popup = new Popup({ closeButton: true, closeOnClick: true });
     map.on("click", (event) => {
-      if (firstPersonModeActiveRef.current) {
-        setFirstPersonOrigin({ lng: event.lngLat.lng, lat: event.lngLat.lat });
-        setFirstPersonModeActive(false);
-        return;
-      }
-
       const layerIds = [
         "forest-fill-a",
         "forest-fill-b",
@@ -941,11 +998,14 @@ export default function MapView() {
         "buildings-fill-a",
         "buildings-fill-b",
       ].filter((id) => map.getLayer(id));
-      if (!layerIds.length) return;
-      const features = map.queryRenderedFeatures(event.point, {
-        layers: layerIds,
-      });
-      if (!features.length) return;
+      const features = layerIds.length ? map.queryRenderedFeatures(event.point, { layers: layerIds }) : [];
+
+      // 森林簿・地籍・建物のいずれも無い（=AR配置ピンでもない）場所をクリックした場合は、
+      // 一人称視点の開始地点として選ぶ（AR配置ピンは独自のクリック処理を持ち、ここには来ない）。
+      if (!features.length) {
+        setFirstPersonPendingOrigin({ lng: event.lngLat.lng, lat: event.lngLat.lat });
+        return;
+      }
 
       const feature = features[0];
       let html;
@@ -1297,12 +1357,12 @@ export default function MapView() {
     };
   }, [locationEnabled, applyLocationPosition, handleLocationError]);
 
-  // 範囲選択（矩形）モード・一人称視点モード中はカーソルをcrosshairにして分かりやすくする
+  // 範囲選択（矩形）モード中はカーソルをcrosshairにして分かりやすくする
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.getCanvas().style.cursor = isSelectingRectangle || firstPersonModeActive ? "crosshair" : "";
-  }, [isSelectingRectangle, firstPersonModeActive]);
+    map.getCanvas().style.cursor = isSelectingRectangle ? "crosshair" : "";
+  }, [isSelectingRectangle]);
 
   return (
     <div className={styles.wrapper}>
@@ -1447,22 +1507,6 @@ export default function MapView() {
               </p>
             </>
           )}
-        </section>
-
-        <section className={styles.section}>
-          <h2>現地確認（一人称視点）</h2>
-          <button
-            type="button"
-            className={styles.locateButton}
-            onClick={() => setFirstPersonModeActive((current) => !current)}
-            disabled={firstPersonModeActive}
-          >
-            {firstPersonModeActive ? "地図をクリックして開始地点を選択..." : "一人称視点で確認"}
-          </button>
-          <p className={styles.status}>
-            現在チェックが入っているレイヤー（森林簿・地籍・OSM建物）とAR配置を、
-            クリックした地点から見回して確認できます。
-          </p>
         </section>
 
         <section className={styles.section}>

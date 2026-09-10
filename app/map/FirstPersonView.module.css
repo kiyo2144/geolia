@@ -13,6 +13,14 @@
   cursor: grab;
 }
 
+.adjustSurface {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: move;
+  touch-action: none;
+}
+
 .topBar {
   position: absolute;
   top: 0.75rem;

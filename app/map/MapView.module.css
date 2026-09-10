@@ -18,6 +18,30 @@
   color: #1a1a1a;
 }
 
+.firstPersonPopup {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.firstPersonPopup button {
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.firstPersonPopup button:first-child {
+  background: #1f6feb;
+  color: #fff;
+}
+
+.firstPersonPopup button:last-child {
+  background: #eee;
+  color: #1a1a1a;
+}
+
 .sidePane {
   width: 280px;
   flex-shrink: 0;

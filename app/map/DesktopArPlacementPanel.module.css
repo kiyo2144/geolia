@@ -1,0 +1,166 @@
+.wrapper {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 0.75rem;
+  z-index: 3;
+  width: 320px;
+  max-width: calc(100vw - 1.5rem);
+  border-radius: 10px;
+  background: rgba(13, 17, 23, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f0f3f7;
+  font-size: 0.85rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.header h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.closeButton {
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #f0f3f7;
+  cursor: pointer;
+}
+
+.body {
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.hint {
+  font-size: 0.78rem;
+  color: #c9d1d9;
+  margin: 0;
+}
+
+.error {
+  font-size: 0.78rem;
+  color: #f85149;
+  margin: 0;
+}
+
+.fileLabel {
+  display: inline-block;
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.fileLabel input {
+  display: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.field input[type="text"] {
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #f0f3f7;
+}
+
+.inputError {
+  border-color: #f85149 !important;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.radioLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+}
+
+.toggleButton,
+.toggleButtonActive {
+  align-self: flex-start;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: #f0f3f7;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.toggleButtonActive {
+  background: #1f6feb;
+  border-color: #1f6feb;
+}
+
+.actions button {
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: #f0f3f7;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.primaryButton {
+  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  border: none;
+  background: #238636;
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  background: #30363d;
+  color: #8b949e;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: transparent;
+  color: #f0f3f7;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.adjustGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.5rem 0.8rem;
+}
+
+.statusSuccess {
+  font-size: 0.85rem;
+  color: #3fb950;
+  margin: 0;
+}

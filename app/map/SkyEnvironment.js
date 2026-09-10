@@ -77,6 +77,16 @@ export function getLightingConfig(timeOfDay, weatherType) {
   };
 }
 
+/**
+ * 地平線付近の空の色（SkyDomeの下端の色と同じ計算）。読み込み範囲の端で地形が
+ * 途切れて見えるのを目立たなくするため、フォグの色をこれに合わせるのに使う。
+ */
+export function getHorizonColor(timeOfDay, weatherType) {
+  const dim = WEATHER_DIM[weatherType] ?? 1;
+  const { bottom } = BASE_SKY_COLORS[timeOfDay];
+  return `#${mixTowardGray(bottom, dim).getHexString()}`;
+}
+
 function buildGlowTexture(colorInner, colorOuter, size = 128) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -143,7 +153,7 @@ function SkyDome({ timeOfDay, weatherType }) {
 
   return (
     <mesh ref={meshRef} geometry={geometry} renderOrder={-2}>
-      <meshBasicMaterial vertexColors side={THREE.BackSide} depthWrite={false} />
+      <meshBasicMaterial vertexColors side={THREE.BackSide} depthWrite={false} fog={false} />
     </mesh>
   );
 }
@@ -163,7 +173,7 @@ function Sun({ timeOfDay }) {
 
   return (
     <sprite ref={ref} position={position} renderOrder={-1}>
-      <spriteMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
+      <spriteMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
     </sprite>
   );
 }
@@ -177,7 +187,7 @@ function Moon() {
 
   return (
     <sprite position={position} renderOrder={-1} scale={[45, 45, 1]}>
-      <spriteMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
+      <spriteMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
     </sprite>
   );
 }
@@ -219,6 +229,7 @@ function Stars() {
         depthWrite={false}
         opacity={0.8}
         blending={THREE.AdditiveBlending}
+        fog={false}
       />
     </points>
   );
@@ -257,7 +268,7 @@ function Clouds({ weatherType }) {
     <group ref={groupRef}>
       {cloudDefs.map((def, i) => (
         <sprite key={i} scale={[def.scale, def.scale * 0.5, 1]} renderOrder={-1}>
-          <spriteMaterial map={texture} color={tint} transparent opacity={opacity} depthWrite={false} />
+          <spriteMaterial map={texture} color={tint} transparent opacity={opacity} depthWrite={false} fog={false} />
         </sprite>
       ))}
     </group>

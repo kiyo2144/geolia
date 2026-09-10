@@ -183,7 +183,11 @@ export async function buildBasemapTexture(bbox, basemapKey) {
 
 const TERRAIN_GRID_SIZE = 64; // 地形メッシュの分割数（1辺あたりの区画数）
 
-export function buildTerrainMesh(bbox, sampleElevation, project, texture) {
+// 読み込み範囲の縁から下方向にこれだけ伸ばした「スカート」の壁を追加し、
+// 縁の下に何もない空間（背景色がそのまま見える不自然な断面）が見えるのを防ぐ。
+const TERRAIN_SKIRT_DEPTH_METERS = 300;
+
+export function buildTerrainMesh(bbox, sampleElevation, project, texture, { skirt = false } = {}) {
   const size = TERRAIN_GRID_SIZE;
   const stride = size + 1;
   const heights = [];
@@ -226,6 +230,36 @@ export function buildTerrainMesh(bbox, sampleElevation, project, texture) {
     }
   }
 
+  if (skirt) {
+    // 縁(上端・下端・左端・右端)それぞれについて、元の頂点の真下にスカート用の
+    // 頂点を追加し、壁面を張る。巻き順を辺ごとに正しく揃えるのは煩雑なため、
+    // マテリアル側をDoubleSideにして裏面カリングの影響を受けないようにする。
+    const addSkirtEdge = (getVertexIndex) => {
+      const base = vertices.length / 3;
+      for (let k = 0; k < stride; k++) {
+        const topIndex = getVertexIndex(k);
+        vertices.push(
+          vertices[topIndex * 3],
+          vertices[topIndex * 3 + 1] - TERRAIN_SKIRT_DEPTH_METERS,
+          vertices[topIndex * 3 + 2],
+        );
+        uvs.push(uvs[topIndex * 2], uvs[topIndex * 2 + 1]);
+      }
+      for (let k = 0; k < stride - 1; k++) {
+        const topA = getVertexIndex(k);
+        const topB = getVertexIndex(k + 1);
+        const bottomA = base + k;
+        const bottomB = base + k + 1;
+        indices.push(topA, bottomA, topB, topB, bottomA, bottomB);
+      }
+    };
+
+    addSkirtEdge((k) => k); // 上端 (j=0)
+    addSkirtEdge((k) => size * stride + k); // 下端 (j=size)
+    addSkirtEdge((k) => k * stride); // 左端 (i=0)
+    addSkirtEdge((k) => k * stride + size); // 右端 (i=size)
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
@@ -233,8 +267,8 @@ export function buildTerrainMesh(bbox, sampleElevation, project, texture) {
   geometry.computeVertexNormals();
 
   const material = texture
-    ? new THREE.MeshStandardMaterial({ map: texture })
-    : new THREE.MeshStandardMaterial({ color: "#8d6e63" });
+    ? new THREE.MeshStandardMaterial({ map: texture, side: skirt ? THREE.DoubleSide : THREE.FrontSide })
+    : new THREE.MeshStandardMaterial({ color: "#8d6e63", side: skirt ? THREE.DoubleSide : THREE.FrontSide });
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "terrain";

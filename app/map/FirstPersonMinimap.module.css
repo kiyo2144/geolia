@@ -8,16 +8,32 @@
 .mapContainer {
   width: 160px;
   height: 160px;
-  min-width: 120px;
-  min-height: 120px;
-  max-width: 360px;
-  max-height: 360px;
   border-radius: 12px;
   overflow: hidden;
-  resize: both;
   border: 1px solid rgba(255, 255, 255, 0.35);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   cursor: crosshair;
+}
+
+.mapContainerLarge {
+  width: 640px;
+  height: 640px;
+  max-width: min(640px, 90vw);
+  max-height: min(640px, 70vh);
+}
+
+.sizeToggleButton {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 1;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  border: none;
+  background: rgba(13, 17, 23, 0.75);
+  color: #fff;
+  cursor: pointer;
 }
 
 .compassBadge {
@@ -103,4 +119,13 @@
   border-radius: 50%;
   background: #ff9f43;
   border: 1.5px solid rgba(13, 17, 23, 0.85);
+}
+
+.pickedMarker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2b6cff;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 3px rgba(43, 108, 255, 0.35);
 }
