@@ -152,6 +152,28 @@ function VerticalGizmo({ movingUp }) {
   );
 }
 
+const GROUND_WARNING_RADIUS_METERS = 1.5;
+
+/**
+ * 設置面が標高タイルの高度に近づいた/達したことを示す、地面位置の赤い半透明の円盤。
+ * adjustment.y による上下移動の影響を受けないよう、AdjustableGroupの外側(y移動前)に配置する。
+ */
+function GroundWarningPlane({ y, visible }) {
+  if (!visible || y === null) return null;
+  return (
+    <mesh position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <circleGeometry args={[GROUND_WARNING_RADIUS_METERS, 32]} />
+      <meshBasicMaterial
+        color="#e63946"
+        transparent
+        opacity={0.35}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
 // React Three Fiber の <Canvas> は position/pointerEvents 等を自前のインラインstyleで
 // 持っているため、外部CSSクラスでは上書きできない。style props で直接渡す必要がある。
 const CANVAS_OVERLAY_STYLE = {
@@ -173,9 +195,10 @@ export function ARScene({
   aimPointRef,
   activeGesture,
   gestureDirection,
+  groundLocalY = null,
+  showGroundWarning = false,
   onVertexColorDetected,
   onSplatLoaded,
-  onCanvasReady,
   decorationPresetKey,
   imageEffectKey,
   motionPresetKey,
@@ -220,16 +243,11 @@ export function ARScene({
   return (
     <Canvas
       style={CANVAS_OVERLAY_STYLE}
-      gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
+      gl={{ alpha: true, antialias: true }}
       camera={{ fov: 70, near: 0.01, far: 2000, position: [0, 0, 0] }}
       onCreated={({ gl }) => {
         // カメラ映像を透かして見せるため、描画バッファのクリア(背景)を完全透明にする
         gl.setClearAlpha(0);
-        // プレビュー画像の撮影（canvasのdrawImage）に使うため、
-        // 描画済みのcanvas要素を呼び出し元に渡す。preserveDrawingBufferを
-        // 有効にしているのは、撮影がレンダーループ外（クリック時）で
-        // 行われてもバッファが消去されずに残るようにするため。
-        onCanvasReady?.(gl.domElement);
       }}
     >
       <OrientedCamera orientation={orientation} />
@@ -248,6 +266,7 @@ export function ARScene({
             <AdjustableGroup adjustment={adjustment} gizmo={gizmo}>
               {content}
             </AdjustableGroup>
+            <GroundWarningPlane y={groundLocalY} visible={showGroundWarning} />
           </GeoAnchoredGroup>
         )}
       </Suspense>

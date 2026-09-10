@@ -6,13 +6,20 @@ import { createClient } from "@/lib/supabase/client";
 import { ARScene } from "../_shared/components/ARScene";
 import { CameraBackground } from "../_shared/components/CameraBackground";
 import { CompassHint } from "../_shared/components/CompassHint";
+import { ThumbnailPreviewCapture } from "../_shared/components/ThumbnailPreviewCapture";
 import { useArGestureControls } from "../_shared/hooks/useArGestureControls";
 import { useCameraStream } from "../_shared/hooks/useCameraStream";
 import { useDeviceOrientation } from "../_shared/hooks/useDeviceOrientation";
 import { useGeolocation } from "../_shared/hooks/useGeolocation";
 import { localMetersToLatLng } from "../../_shared/lib/geoMath";
 import { PlacementLocationMap } from "../../_shared/components/PlacementLocationMap";
+import { createElevationSampler } from "../../map/mapMeshBuilders";
 import styles from "./ArNewView.module.css";
+
+// 標高タイルサンプラーを取得する範囲（度）。DEM_TILE_ZOOMのタイル1枚で十分覆える広さ。
+const ELEVATION_SAMPLER_MARGIN_DEGREES = 0.003;
+// 設置面が標高タイルの高度にこれだけ近づいたら、警告表示を出す
+const GROUND_WARNING_MARGIN_METERS = 0.5;
 
 // x/z(水平位置)は「狙い撃ち配置」で決まるため、微調整では上下移動・回転・拡大縮小のみ扱う
 const DEFAULT_ADJUSTMENT = { y: 0, rotationX: 0, rotationY: 0, scale: 1 };
@@ -121,6 +128,8 @@ export function ArNewView() {
   // （視覚トラッキングの代わりに、確定後は自己位置を凍結する簡易的な対策）。
   const [frozenUserPosition, setFrozenUserPosition] = useState(null);
   const [adjustment, setAdjustment] = useState(DEFAULT_ADJUSTMENT);
+  // 設置場所(lat/lng)における標高タイルの高度。設置面がこれを下回らないようにする
+  const [groundElevation, setGroundElevation] = useState(null);
   const [isAdjustMode, setIsAdjustMode] = useState(true);
   // 'aiming'(狙い撃ちで大まかな位置合わせ) | 'fine-tune'(回転・上下移動などの微調整)
   const [arSubMode, setArSubMode] = useState("aiming");
@@ -142,7 +151,7 @@ export function ArNewView() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
   const [isSaved, setIsSaved] = useState(false);
-  // 設置確定時に撮影した、カメラ映像＋3Dデータの合成プレビュー画像
+  // データ選択時に撮影する、画像・3Dモデル単体のプレビュー画像（配置一覧等のサムネイル用）
   const [previewBlob, setPreviewBlob] = useState(null);
 
   const geolocation = useGeolocation({ watch: true });
@@ -152,8 +161,6 @@ export function ArNewView() {
   // 狙い撃ちモードでカメラ正面に表示している地点のローカル座標(east/north)。
   // Canvas内で毎フレーム更新され、「ここに配置」ボタン押下時に読み取る。
   const aimPointRef = useRef({ east: 0, north: 0 });
-  // プレビュー画像撮影用。ARScene側で生成されたcanvas要素への参照。
-  const arCanvasRef = useRef(null);
 
   const dataFormat = useMemo(() => getDataFormat(dataFile), [dataFile]);
   const splatFileType = useMemo(
@@ -169,6 +176,35 @@ export function ArNewView() {
       if (dataUrl) URL.revokeObjectURL(dataUrl);
     };
   }, [dataUrl]);
+
+  // 静止画・GIFはそのままサムネイルとして使えるため、選択され次第自動でプレビューを生成する
+  // （3Dモデルはアングルを選べる<ThumbnailPreviewCapture>から手動で撮影する）。
+  useEffect(() => {
+    if (dataFormat !== "image" && dataFormat !== "gif") return;
+    if (!dataUrl) return;
+
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext("2d").drawImage(image, 0, 0);
+      canvas.toBlob(
+        (blob) => {
+          if (!cancelled && blob) setPreviewBlob(blob);
+        },
+        "image/jpeg",
+        0.85,
+      );
+    };
+    image.src = dataUrl;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataFormat, dataUrl]);
 
   // VRM用: アップロードされたモーションファイル(.vrma)の一時URL
   const motionFileUrl = useMemo(
@@ -193,30 +229,6 @@ export function ArNewView() {
     };
   }, [previewUrl]);
 
-  // カメラ映像とAR描画(three.jsのcanvas)を合成し、設置時点の見た目を
-  // プレビュー画像として撮影する。カメラを使わず現在地をそのまま設置場所にした
-  // 場合はcanvasが存在しないため、その場合はプレビューを生成しない。
-  const capturePreview = () => {
-    const video = cameraStream.videoRef.current;
-    const arCanvas = arCanvasRef.current;
-    if (!video || !arCanvas || video.readyState < 2) return;
-
-    const rect = video.getBoundingClientRect();
-    const width = Math.round(rect.width) || video.videoWidth || arCanvas.width;
-    const height = Math.round(rect.height) || video.videoHeight || arCanvas.height;
-    if (!width || !height) return;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, width, height);
-    ctx.drawImage(arCanvas, 0, 0, width, height);
-    canvas.toBlob((blob) => {
-      if (blob) setPreviewBlob(blob);
-    }, "image/jpeg", 0.85);
-  };
-
   // AR配置ステップから離れたらカメラを止める
   useEffect(() => {
     if (step !== "ar" && cameraStream.isActive) {
@@ -232,6 +244,7 @@ export function ArNewView() {
         setFileError("対応していないファイル形式です");
         setDataFile(null);
         setColorInfo(null);
+        setPreviewBlob(null);
         event.target.value = "";
         return;
       }
@@ -242,6 +255,7 @@ export function ArNewView() {
         );
         setDataFile(null);
         setColorInfo(null);
+        setPreviewBlob(null);
         event.target.value = "";
         return;
       }
@@ -255,6 +269,7 @@ export function ArNewView() {
     setMotionPresetKey("idle");
     setMotionFile(null);
     setMotionFileError(null);
+    setPreviewBlob(null);
     setIsSaved(false);
   };
 
@@ -324,7 +339,21 @@ export function ArNewView() {
     setAdjustment(DEFAULT_ADJUSTMENT);
     setArSubMode("fine-tune");
     setIsSaved(false);
-    capturePreview();
+
+    setGroundElevation(null);
+    const margin = ELEVATION_SAMPLER_MARGIN_DEGREES;
+    createElevationSampler({
+      minLng: confirmedLatLng.lng - margin,
+      maxLng: confirmedLatLng.lng + margin,
+      minLat: confirmedLatLng.lat - margin,
+      maxLat: confirmedLatLng.lat + margin,
+    })
+      .then((sampler) => {
+        setGroundElevation(sampler(confirmedLatLng.lng, confirmedLatLng.lat));
+      })
+      .catch(() => {
+        // 標高タイルが取得できなくても設置自体は継続できるようにする(警告表示のみ諦める)
+      });
   };
 
   const handleBackToAiming = () => setArSubMode("aiming");
@@ -351,15 +380,27 @@ export function ArNewView() {
     [dataFormat],
   );
 
+  // 設置面(adjustment.y)の下限。placement.altitude + y が標高タイルの高度を
+  // 下回らないよう、対応するローカルY座標をあらかじめ求めておく。
+  const groundLocalY = useMemo(() => {
+    if (groundElevation === null || !placement || placement.altitude === null || placement.altitude === undefined) {
+      return null;
+    }
+    return groundElevation - placement.altitude;
+  }, [groundElevation, placement]);
+
   const handleVertical = useCallback(
     (deltaY) => {
       // 画面上で指を上に動かす(deltaYが負)ほど、3Dデータを上に持ち上げる
       const verticalDelta =
         -deltaY * VERTICAL_METERS_PER_PIXEL * getGestureSensitivityMultiplier(dataFormat);
       setGestureDirection(verticalDelta >= 0 ? 1 : -1);
-      setAdjustment((prev) => ({ ...prev, y: prev.y + verticalDelta }));
+      setAdjustment((prev) => {
+        const nextY = prev.y + verticalDelta;
+        return { ...prev, y: groundLocalY === null ? nextY : Math.max(nextY, groundLocalY) };
+      });
     },
-    [dataFormat],
+    [dataFormat, groundLocalY],
   );
 
   const handleResetAdjustment = () => setAdjustment(DEFAULT_ADJUSTMENT);
@@ -376,6 +417,10 @@ export function ArNewView() {
     // Gaussian Splat(.spz等)はスプラットごとにRGBAを保持しているため常に元データの色になる
     setColorInfo("original");
   }, []);
+
+  // 設置面が標高タイルの高度に近づいている(または下限に達している)かどうか
+  const isNearGround =
+    groundLocalY !== null && adjustment.y <= groundLocalY + GROUND_WARNING_MARGIN_METERS;
 
   const gestureSurfaceRef = useArGestureControls({
     enabled: cameraStream.isActive && arSubMode === "fine-tune" && isAdjustMode,
@@ -636,6 +681,26 @@ export function ArNewView() {
             </div>
           )}
 
+          {dataUrl && (dataFormat === "splat" || dataFormat === "ply" || dataFormat === "vrm") && (
+            <div className={styles.field}>
+              <p>サムネイル（配置一覧などに表示される画像）</p>
+              <ThumbnailPreviewCapture
+                dataFormat={dataFormat}
+                dataUrl={dataUrl}
+                splatFileType={splatFileType}
+                onCapture={setPreviewBlob}
+              />
+              {previewUrl ? (
+                <p className={styles.hint}>
+                  <img src={previewUrl} alt="サムネイルプレビュー" className={styles.thumbnailSmall} />
+                  撮影済み
+                </p>
+              ) : (
+                <p className={styles.hint}>まだ撮影されていません（未撮影でも投稿できます）</p>
+              )}
+            </div>
+          )}
+
           <div className={styles.actions}>
             <button type="button" onClick={handleProceedToAr} disabled={!!fileError}>
               ARの設置に進む
@@ -668,11 +733,10 @@ export function ArNewView() {
                 aimPointRef={aimPointRef}
                 activeGesture={activeGesture}
                 gestureDirection={gestureDirection}
+                groundLocalY={groundLocalY}
+                showGroundWarning={arSubMode === "fine-tune" && isNearGround}
                 onVertexColorDetected={handleVertexColorDetected}
                 onSplatLoaded={handleSplatLoaded}
-                onCanvasReady={(canvas) => {
-                  arCanvasRef.current = canvas;
-                }}
                 decorationPresetKey={decorationPresetKey}
                 imageEffectKey={imageEffectKey}
                 motionPresetKey={motionSourceMode === "preset" ? motionPresetKey : null}
@@ -723,6 +787,10 @@ export function ArNewView() {
                       <p className={styles.adjustHint}>
                         1本指スワイプで回転（フリックで慣性あり） ・ 2本指を上下にスライドで上下移動 ・ ピンチで拡大縮小
                       </p>
+                    )}
+
+                    {isNearGround && (
+                      <p className={styles.groundWarning}>地面より下には設置できません</p>
                     )}
 
                     {dataUrl && colorInfo && (

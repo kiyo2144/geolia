@@ -39,6 +39,16 @@
   border: 1px solid #30363d;
 }
 
+.thumbnailSmall {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  margin-bottom: 0.35rem;
+}
+
 .field input[type="text"] {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
@@ -182,6 +192,16 @@
   font-size: 0.75rem;
   color: #c9d1d9;
   background: rgba(13, 17, 23, 0.7);
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  text-align: center;
+}
+
+.groundWarning {
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: #fff;
+  background: rgba(230, 57, 70, 0.85);
   padding: 0.3rem 0.7rem;
   border-radius: 999px;
   text-align: center;

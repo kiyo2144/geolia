@@ -1,0 +1,38 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.canvasArea {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #30363d;
+  touch-action: none;
+  cursor: grab;
+}
+
+.canvasArea:active {
+  cursor: grabbing;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: #8b949e;
+  margin: 0;
+}
+
+.captureButton {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: #1f6feb;
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
