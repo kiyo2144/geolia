@@ -28,10 +28,24 @@ import styles from "./ArNewView.module.css";
 
 // 標高タイルサンプラーを取得する範囲（度）。DEM_TILE_ZOOMのタイル1枚で十分覆える広さ。
 const ELEVATION_SAMPLER_MARGIN_DEGREES = 0.003;
-// 設置面が標高タイルの高度にこれだけ近づいたら、警告表示を出す。
-// GPSの高度はiPhone実機で標高タイルとの差異が4〜6m程度出ることが確認できたため、
-// その誤差を吸収できるよう余裕を持たせている（要調整）。
-const GROUND_WARNING_MARGIN_METERS = 4;
+
+// 設置面が標高タイルの高度にこれだけ近づいたら、警告表示を出すマージン。
+// GPSの高度誤差は電波状況に左右され、屋内などGPS精度(accuracy)が悪い状況では
+// 標高タイルとの差異が数m以上になることがある一方、屋外の精度の良い状況では
+// 誤差はそれほど大きくない（実機確認）。固定値ではなく、その時点のGPS精度に応じて
+// マージンを動的に決める。
+const GROUND_WARNING_MARGIN_MIN_METERS = 1.5;
+const GROUND_WARNING_MARGIN_MAX_METERS = 8;
+// GPSのaccuracy(誤差半径,m)に対してこの倍率でマージンを取る
+const GROUND_WARNING_ACCURACY_FACTOR = 0.5;
+
+function computeGroundWarningMargin(accuracy) {
+  if (accuracy === null || accuracy === undefined) return GROUND_WARNING_MARGIN_MIN_METERS;
+  return Math.min(
+    Math.max(accuracy * GROUND_WARNING_ACCURACY_FACTOR, GROUND_WARNING_MARGIN_MIN_METERS),
+    GROUND_WARNING_MARGIN_MAX_METERS,
+  );
+}
 
 // x/z(水平位置)は「狙い撃ち配置」で決まるため、微調整では上下移動・回転・拡大縮小のみ扱う
 const DEFAULT_ADJUSTMENT = { y: 0, rotationX: 0, rotationY: 0, scale: 1 };
@@ -279,7 +293,11 @@ export function ArNewView() {
     if (!geolocation.position) return;
 
     const confirmedLatLng = localMetersToLatLng(geolocation.position, aimPointRef.current);
-    setPlacement({ ...confirmedLatLng, altitude: geolocation.position.altitude });
+    setPlacement({
+      ...confirmedLatLng,
+      altitude: geolocation.position.altitude,
+      accuracy: geolocation.position.accuracy,
+    });
     setFrozenUserPosition(geolocation.position);
     setAdjustment(DEFAULT_ADJUSTMENT);
     setArSubMode("fine-tune");
@@ -363,9 +381,14 @@ export function ArNewView() {
     setColorInfo("original");
   }, []);
 
+  // その時点のGPS精度に応じた警告マージン（精度が良いほど狭く、悪いほど広くなる）
+  const groundWarningMargin = useMemo(
+    () => computeGroundWarningMargin(placement?.accuracy),
+    [placement],
+  );
+
   // 設置面が標高タイルの高度に近づいている(または下限に達している)かどうか
-  const isNearGround =
-    groundLocalY !== null && adjustment.y <= groundLocalY + GROUND_WARNING_MARGIN_METERS;
+  const isNearGround = groundLocalY !== null && adjustment.y <= groundLocalY + groundWarningMargin;
 
   const gestureSurfaceRef = useArGestureControls({
     enabled: cameraStream.isActive && arSubMode === "fine-tune" && isAdjustMode,

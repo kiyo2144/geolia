@@ -23,6 +23,8 @@ import { DesktopArPlacementPanel } from "./DesktopArPlacementPanel";
 import { useDesktopAdjustGestures } from "./useDesktopAdjustGestures";
 import { GhostablePlacement } from "./GhostablePlacement";
 import { isPlacementOccluded } from "./occlusion";
+import { useArPlacementEdit } from "./useArPlacementEdit";
+import { ArPlacementEditPanel } from "./ArPlacementEditPanel";
 import styles from "./FirstPersonView.module.css";
 
 const TIME_OF_DAY_LABELS = { morning: "朝", day: "昼", night: "夜" };
@@ -286,6 +288,9 @@ export function FirstPersonView({
     onSaved: refetchPlacements,
   });
 
+  // 既存のAR配置をその場で編集する機能。サブマップ上の配置マーカーをクリックすると開く。
+  const arEdit = useArPlacementEdit({ supabase, onSaved: refetchPlacements });
+
   useEffect(() => {
     let cancelled = false;
 
@@ -382,12 +387,16 @@ export function FirstPersonView({
 
   // 「配置調整」がONの間、Canvasの上に重ねた透明なオーバーレイでドラッグ・ホイールを
   // 拾い、AR配置の回転・高さ・拡大縮小を操作する（一人称視点のカメラ操作の代わりに使う）。
-  const adjustGestureEnabled = desktopPlacement.active && desktopPlacement.step === "adjust" && desktopPlacement.isAdjustMode;
+  // 新規設置の調整中・既存配置の編集中のどちらかがONの間だけ有効にする（同時には起きない）。
+  const createAdjustActive =
+    desktopPlacement.active && desktopPlacement.step === "adjust" && desktopPlacement.isAdjustMode;
+  const editAdjustActive = !!arEdit.editingPlacement && arEdit.isAdjustMode;
+  const adjustGestureEnabled = createAdjustActive || editAdjustActive;
   const adjustSurfaceRef = useDesktopAdjustGestures({
     enabled: adjustGestureEnabled,
-    onRotateByDelta: desktopPlacement.rotateByDelta,
-    onHeightByDelta: desktopPlacement.changeHeightByDelta,
-    onScaleStep: desktopPlacement.changeScale,
+    onRotateByDelta: editAdjustActive ? arEdit.rotateByDelta : desktopPlacement.rotateByDelta,
+    onHeightByDelta: editAdjustActive ? arEdit.changeHeightByDelta : desktopPlacement.changeHeightByDelta,
+    onScaleStep: editAdjustActive ? arEdit.changeScale : desktopPlacement.changeScale,
   });
 
   const hasSplat = useMemo(
@@ -422,7 +431,7 @@ export function FirstPersonView({
         <button type="button" className={styles.closeButton} onClick={onClose}>
           閉じる
         </button>
-        {sceneData && !desktopPlacement.active && (
+        {sceneData && !desktopPlacement.active && !arEdit.editingPlacement && (
           <button type="button" className={styles.closeButton} onClick={desktopPlacement.open}>
             AR設置
           </button>
@@ -471,24 +480,44 @@ export function FirstPersonView({
           ))}
 
           <Suspense fallback={null}>
-            {sceneData.placements.map((placement) => (
-              <group
-                key={placement.id}
-                position={[placement.localX, placement.localY, placement.localZ]}
-              >
-                <GhostablePlacement ghost={occludedPlacementIds.has(placement.id)}>
-                  <DetailedPlacement
-                    placement={placement}
-                    url={getPublicUrl(placement.storage_path)}
-                    motionAssetUrl={
-                      placement.motion_storage_path
-                        ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
-                        : null
-                    }
-                  />
-                </GhostablePlacement>
-              </group>
-            ))}
+            {sceneData.placements.map((placement) => {
+              const isEditing = arEdit.editingPlacement?.id === placement.id;
+              // 編集中は保存済みの値ではなく、その場で操作中のadjustmentをそのまま
+              // 反映することでライブプレビューにする（専用のプレビューは持たない）。
+              const renderedPlacement = isEditing
+                ? {
+                    ...placement,
+                    rotation_x: arEdit.adjustment.rotationX,
+                    rotation_y: arEdit.adjustment.rotationY,
+                    scale: arEdit.adjustment.scale,
+                  }
+                : placement;
+              const renderedLocalY = isEditing
+                ? placement.localY - (placement.vertical_offset ?? 0) + arEdit.adjustment.y
+                : placement.localY;
+              const ghost = isEditing
+                ? isPlacementOccluded(
+                    { lng: placement.lng, lat: placement.lat, altitude: arEdit.editingPlacement.groundElevation + arEdit.adjustment.y },
+                    { sampleElevation: sceneData.sampleElevation, project: sceneData.project, buildingFeatures: sceneData.buildingFeatures },
+                  )
+                : occludedPlacementIds.has(placement.id);
+
+              return (
+                <group key={placement.id} position={[placement.localX, renderedLocalY, placement.localZ]}>
+                  <GhostablePlacement ghost={ghost}>
+                    <DetailedPlacement
+                      placement={renderedPlacement}
+                      url={getPublicUrl(placement.storage_path)}
+                      motionAssetUrl={
+                        placement.motion_storage_path
+                          ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
+                          : null
+                      }
+                    />
+                  </GhostablePlacement>
+                </group>
+              );
+            })}
           </Suspense>
 
           {desktopPlacement.active && desktopPlacement.dataUrl && (
@@ -516,6 +545,7 @@ export function FirstPersonView({
       {adjustGestureEnabled && <div ref={adjustSurfaceRef} className={styles.adjustSurface} />}
 
       {desktopPlacement.active && <DesktopArPlacementPanel placement={desktopPlacement} />}
+      {arEdit.editingPlacement && <ArPlacementEditPanel edit={arEdit} />}
 
       {sceneData && (
         <FirstPersonMinimap
@@ -528,6 +558,7 @@ export function FirstPersonView({
           placementPickActive={desktopPlacement.active && desktopPlacement.step === "aiming"}
           onPlacementPick={desktopPlacement.pickAimPosition}
           pickedLngLat={desktopPlacement.active ? desktopPlacement.aimLngLat : null}
+          onPlacementSelect={desktopPlacement.active ? undefined : arEdit.open}
         />
       )}
 

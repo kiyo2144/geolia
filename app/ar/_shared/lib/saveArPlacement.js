@@ -111,3 +111,29 @@ export async function saveArPlacement(
   });
   if (placementError) throw placementError;
 }
+
+/**
+ * 既存のAR配置の位置・向き・高さ・拡大縮小・名前を更新する（ファイル自体の差し替えは
+ * 対象外。ファイル差し替えが必要な場合は新規に設置し直す運用を想定）。
+ */
+export async function updateArPlacement(
+  supabase,
+  placementId,
+  { label, lat, lng, altitude, rotationX, rotationY, scale, verticalOffset, onStatus },
+) {
+  onStatus?.("配置情報を更新中...");
+  const { error } = await supabase
+    .from("ar_placements")
+    .update({
+      label: label.trim(),
+      lat,
+      lng,
+      altitude,
+      rotation_x: rotationX,
+      rotation_y: rotationY,
+      scale,
+      vertical_offset: verticalOffset,
+    })
+    .eq("id", placementId);
+  if (error) throw error;
+}

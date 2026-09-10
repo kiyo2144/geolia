@@ -89,6 +89,7 @@ export function FirstPersonMinimap({
   placementPickActive,
   onPlacementPick,
   pickedLngLat,
+  onPlacementSelect,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -107,6 +108,10 @@ export function FirstPersonMinimap({
   useEffect(() => {
     onPlacementPickRef.current = onPlacementPick;
   }, [onPlacementPick]);
+  const onPlacementSelectRef = useRef(onPlacementSelect);
+  useEffect(() => {
+    onPlacementSelectRef.current = onPlacementSelect;
+  }, [onPlacementSelect]);
 
   useEffect(() => {
     const map = new maplibregl.Map({
@@ -167,7 +172,9 @@ export function FirstPersonMinimap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 周辺AR配置マーカー（配置は読み込み時に確定するため、変化した場合のみ張り直す）
+  // 周辺AR配置マーカー（配置は読み込み時に確定するため、変化した場合のみ張り直す）。
+  // クリックすると、その場でAR配置を編集できるようにする（地図側の瞬間移動クリックと
+  // 競合しないよう、マーカー要素上でstopPropagationする）。
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
@@ -176,6 +183,13 @@ export function FirstPersonMinimap({
       .map((placement) => {
         const el = document.createElement("div");
         el.className = styles.placementMarker;
+        if (onPlacementSelectRef.current) {
+          el.style.cursor = "pointer";
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            onPlacementSelectRef.current?.(placement);
+          });
+        }
         return new maplibregl.Marker({ element: el }).setLngLat([placement.lng, placement.lat]).addTo(map);
       });
     return () => {
