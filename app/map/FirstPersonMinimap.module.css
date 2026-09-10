@@ -121,6 +121,14 @@
   border: 1.5px solid rgba(13, 17, 23, 0.85);
 }
 
+.placementMarkerEditing {
+  width: 14px;
+  height: 14px;
+  background: #3b82f6;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.45);
+}
+
 .pickedMarker {
   width: 14px;
   height: 14px;

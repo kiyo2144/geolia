@@ -90,11 +90,13 @@ export function FirstPersonMinimap({
   onPlacementPick,
   pickedLngLat,
   onPlacementSelect,
+  editingPlacementId,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const playerMarkerRef = useRef(null);
   const pickedMarkerRef = useRef(null);
+  const placementMarkerElsRef = useRef(new Map());
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [isEnlarged, setIsEnlarged] = useState(false);
   const { heading, needsPermission, requestPermission } = useDeviceHeading();
@@ -178,11 +180,13 @@ export function FirstPersonMinimap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
+    const elById = new Map();
     const markers = placements
       .filter((placement) => placement.lng != null && placement.lat != null)
       .map((placement) => {
         const el = document.createElement("div");
         el.className = styles.placementMarker;
+        elById.set(placement.id, el);
         if (onPlacementSelectRef.current) {
           el.style.cursor = "pointer";
           el.addEventListener("click", (event) => {
@@ -192,10 +196,20 @@ export function FirstPersonMinimap({
         }
         return new maplibregl.Marker({ element: el }).setLngLat([placement.lng, placement.lat]).addTo(map);
       });
+    placementMarkerElsRef.current = elById;
     return () => {
       markers.forEach((marker) => marker.remove());
+      placementMarkerElsRef.current = new Map();
     };
   }, [placements]);
+
+  // 編集中の配置マーカーを青くハイライトする（マーカー自体の張り直しはせず、
+  // 対象要素のクラスだけ切り替える）
+  useEffect(() => {
+    placementMarkerElsRef.current.forEach((el, id) => {
+      el.classList.toggle(styles.placementMarkerEditing, id === editingPlacementId);
+    });
+  }, [editingPlacementId, placements]);
 
   // AR設置でサブマップクリックにより選んだ候補地点のマーカー
   useEffect(() => {

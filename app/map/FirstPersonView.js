@@ -25,6 +25,7 @@ import { GhostablePlacement } from "./GhostablePlacement";
 import { isPlacementOccluded } from "./occlusion";
 import { useArPlacementEdit } from "./useArPlacementEdit";
 import { ArPlacementEditPanel } from "./ArPlacementEditPanel";
+import { EditHighlightRing } from "./EditHighlightRing";
 import styles from "./FirstPersonView.module.css";
 
 const TIME_OF_DAY_LABELS = { morning: "朝", day: "昼", night: "夜" };
@@ -492,9 +493,8 @@ export function FirstPersonView({
                     scale: arEdit.adjustment.scale,
                   }
                 : placement;
-              const renderedLocalY = isEditing
-                ? placement.localY - (placement.vertical_offset ?? 0) + arEdit.adjustment.y
-                : placement.localY;
+              const groundLocalY = placement.localY - (placement.vertical_offset ?? 0);
+              const renderedLocalY = isEditing ? groundLocalY + arEdit.adjustment.y : placement.localY;
               const ghost = isEditing
                 ? isPlacementOccluded(
                     { lng: placement.lng, lat: placement.lat, altitude: arEdit.editingPlacement.groundElevation + arEdit.adjustment.y },
@@ -503,18 +503,23 @@ export function FirstPersonView({
                 : occludedPlacementIds.has(placement.id);
 
               return (
-                <group key={placement.id} position={[placement.localX, renderedLocalY, placement.localZ]}>
-                  <GhostablePlacement ghost={ghost}>
-                    <DetailedPlacement
-                      placement={renderedPlacement}
-                      url={getPublicUrl(placement.storage_path)}
-                      motionAssetUrl={
-                        placement.motion_storage_path
-                          ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
-                          : null
-                      }
-                    />
-                  </GhostablePlacement>
+                <group key={placement.id}>
+                  <group position={[placement.localX, renderedLocalY, placement.localZ]}>
+                    <GhostablePlacement ghost={ghost}>
+                      <DetailedPlacement
+                        placement={renderedPlacement}
+                        url={getPublicUrl(placement.storage_path)}
+                        motionAssetUrl={
+                          placement.motion_storage_path
+                            ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
+                            : null
+                        }
+                      />
+                    </GhostablePlacement>
+                  </group>
+                  {isEditing && (
+                    <EditHighlightRing position={[placement.localX, groundLocalY + 0.02, placement.localZ]} />
+                  )}
                 </group>
               );
             })}
@@ -559,6 +564,7 @@ export function FirstPersonView({
           onPlacementPick={desktopPlacement.pickAimPosition}
           pickedLngLat={desktopPlacement.active ? desktopPlacement.aimLngLat : null}
           onPlacementSelect={desktopPlacement.active ? undefined : arEdit.open}
+          editingPlacementId={arEdit.editingPlacement?.id ?? null}
         />
       )}
 
