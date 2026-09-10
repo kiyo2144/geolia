@@ -18,8 +18,10 @@ import styles from "./ArNewView.module.css";
 
 // 標高タイルサンプラーを取得する範囲（度）。DEM_TILE_ZOOMのタイル1枚で十分覆える広さ。
 const ELEVATION_SAMPLER_MARGIN_DEGREES = 0.003;
-// 設置面が標高タイルの高度にこれだけ近づいたら、警告表示を出す
-const GROUND_WARNING_MARGIN_METERS = 0.5;
+// 設置面が標高タイルの高度にこれだけ近づいたら、警告表示を出す。
+// GPSの高度はiPhone実機で標高タイルとの差異が4〜6m程度出ることが確認できたため、
+// その誤差を吸収できるよう余裕を持たせている（要調整）。
+const GROUND_WARNING_MARGIN_METERS = 4;
 
 // x/z(水平位置)は「狙い撃ち配置」で決まるため、微調整では上下移動・回転・拡大縮小のみ扱う
 const DEFAULT_ADJUSTMENT = { y: 0, rotationX: 0, rotationY: 0, scale: 1 };

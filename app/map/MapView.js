@@ -130,6 +130,45 @@ class PitchControl {
   }
 }
 
+/**
+ * 地図上のカーソル位置の緯度・経度・標高を表示するmaplibre-glカスタムコントロール。
+ * mousemoveのたびにReactの再レンダーを起こさないよう、DOM要素を直接更新する。
+ */
+class CursorInfoControl {
+  onAdd() {
+    const container = document.createElement("div");
+    container.className = "maplibregl-ctrl";
+    Object.assign(container.style, {
+      padding: "4px 8px",
+      background: "rgba(255, 255, 255, 0.85)",
+      borderRadius: "4px",
+      fontSize: "11px",
+      lineHeight: "1.6",
+      color: "#1a1a1a",
+      fontFamily: "monospace",
+      whiteSpace: "nowrap",
+      display: "none",
+    });
+    this._container = container;
+    return container;
+  }
+
+  update(lng, lat, elevation) {
+    this._container.style.display = "block";
+    const elevationLabel =
+      elevation === null || elevation === undefined ? "-" : `約${elevation.toFixed(1)}m`;
+    this._container.textContent = `緯度 ${lat.toFixed(6)} / 経度 ${lng.toFixed(6)} / 標高 ${elevationLabel}`;
+  }
+
+  clear() {
+    this._container.style.display = "none";
+  }
+
+  onRemove() {
+    this._container.remove();
+  }
+}
+
 // 平泉町の森林簿・地籍データの実際の範囲（南西・北東の緯度経度）。
 // forest_parcels / land_parcels 全件のジオメトリから算出した実測値。
 const HIRAIZUMI_DATA_BOUNDS = [
@@ -443,6 +482,8 @@ export default function MapView() {
   // 標高タイルの実際の値と大きく異なる値を返すことがあり、地図を傾けた際に
   // マーカーの位置が地形とずれて見える不具合の原因になっていたため。
   const elevationSamplerRef = useRef(() => 0);
+  // カーソル位置の緯度経度・標高を表示するコントロール（mousemoveで直接更新する）
+  const cursorInfoControlRef = useRef(null);
 
   const [arPlacementsVisible, setArPlacementsVisible] = useState(true);
   const arPlacementsVisibleRef = useRef(arPlacementsVisible);
@@ -830,6 +871,9 @@ export default function MapView() {
     );
     map.addControl(new PitchControl(), "top-right");
     map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
+    const cursorInfoControl = new CursorInfoControl();
+    map.addControl(cursorInfoControl, "bottom-left");
+    cursorInfoControlRef.current = cursorInfoControl;
 
     // マップエクスポート機能の「矩形選択」用オーバーレイのソースID
     const selectionRectSourceId = "selection-rect";
@@ -1078,6 +1122,18 @@ export default function MapView() {
     };
     map.on("mousedown", handleSelectionMouseDown);
 
+    // カーソル位置の緯度経度・標高を左下のコントロールに表示する
+    const handleCursorMove = (event) => {
+      const { lng, lat } = event.lngLat;
+      const elevation = elevationSamplerRef.current(lng, lat);
+      cursorInfoControlRef.current?.update(lng, lat, elevation);
+    };
+    const handleCursorLeave = () => {
+      cursorInfoControlRef.current?.clear();
+    };
+    map.on("mousemove", handleCursorMove);
+    map.on("mouseout", handleCursorLeave);
+
     // 右ドラッグ／Ctrl+ドラッグに加えて、スクロールボタン（ホイールクリック）を
     // 押しながらのドラッグでも地図の回転・傾きを操作できるようにする（3ボタンマウス向け）。
     // なお、MacBookのトラックパッドは既定で「2本指クリック」が副ボタン（右クリック）に
@@ -1123,6 +1179,9 @@ export default function MapView() {
       map.off("mousedown", handleSelectionMouseDown);
       map.off("mousemove", handleSelectionMouseMove);
       map.off("mouseup", handleSelectionMouseUp);
+      map.off("mousemove", handleCursorMove);
+      map.off("mouseout", handleCursorLeave);
+      cursorInfoControlRef.current = null;
       canvasContainer.removeEventListener("mousedown", handleMiddleButtonDown);
       window.removeEventListener("mousemove", handleMiddleButtonMove);
       window.removeEventListener("mouseup", handleMiddleButtonUp);
