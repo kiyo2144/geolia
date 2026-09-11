@@ -13,14 +13,19 @@ export function SparkSetup() {
 
   useEffect(() => {
     let isCancelled = false;
+    let renderer = null;
 
     import("@sparkjsdev/spark").then(({ SparkRenderer }) => {
       if (isCancelled) return;
-      setSparkRenderer(new SparkRenderer({ renderer: gl }));
+      renderer = new SparkRenderer({ renderer: gl });
+      setSparkRenderer(renderer);
     });
 
     return () => {
       isCancelled = true;
+      // dispose()を呼ばないと、Gaussian Splatの表示/非表示が切り替わるたびに
+      // GPUリソースが解放されず蓄積し、端末のメモリ不足クラッシュにつながる
+      renderer?.dispose();
     };
   }, [gl]);
 

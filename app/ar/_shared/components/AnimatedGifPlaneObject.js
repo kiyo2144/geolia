@@ -12,15 +12,17 @@ const BASE_WIDTH_METERS = 1;
  * gifuct-jsのデコード結果(1フレーム分)を、累積フレームcanvas上に合成する。
  * disposalType === 2 の場合はそのフレーム領域を次に描画する前にクリアする
  * （GIF仕様上「背景色に戻す」指示のため）。
+ * patchCanvas: 呼び出し側が使い回す作業用canvas（毎フレーム呼ばれるため、ここで
+ * document.createElement("canvas")すると大量のcanvas要素を生み続けてしまい、
+ * iOSのSafariでcanvasの合計メモリ上限に達してクラッシュする原因になる）。
  */
-function drawFrameToCanvas(ctx, frame, pendingClear) {
+function drawFrameToCanvas(ctx, frame, pendingClear, patchCanvas) {
   if (pendingClear) {
     ctx.clearRect(pendingClear.left, pendingClear.top, pendingClear.width, pendingClear.height);
   }
 
   const { dims, patch } = frame;
   const imageData = new ImageData(patch, dims.width, dims.height);
-  const patchCanvas = document.createElement("canvas");
   patchCanvas.width = dims.width;
   patchCanvas.height = dims.height;
   patchCanvas.getContext("2d").putImageData(imageData, 0, 0);
@@ -43,6 +45,11 @@ export function AnimatedGifPlaneObject({ url, decorationPresetKey, imageEffectKe
   const materialRef = useRef(null);
   const framesRef = useRef(null);
   const frameCanvasRef = useRef(null);
+  // GIFの合成・装飾descriptor描画に使う作業用canvas。毎フレーム作り直さず使い回す
+  // （document.createElement("canvas")を毎フレーム呼ぶと、iOSのSafariでcanvas全体の
+  // メモリ上限に達してタブがクラッシュ・再読み込みを繰り返す不具合の原因になっていた）。
+  const patchCanvasRef = useRef(null);
+  const outputCanvasRef = useRef(null);
   const animRef = useRef({ frameIndex: 0, elapsedMs: 0 });
 
   useEffect(() => {
@@ -59,7 +66,8 @@ export function AnimatedGifPlaneObject({ url, decorationPresetKey, imageEffectKe
       const frameCanvas = document.createElement("canvas");
       frameCanvas.width = gif.lsd.width;
       frameCanvas.height = gif.lsd.height;
-      drawFrameToCanvas(frameCanvas.getContext("2d"), frames[0], null);
+      const patchCanvas = document.createElement("canvas");
+      drawFrameToCanvas(frameCanvas.getContext("2d"), frames[0], null, patchCanvas);
 
       const outputCanvas = buildFramedCanvas(frameCanvas, decorationPresetKey);
       const tex = new THREE.CanvasTexture(outputCanvas);
@@ -67,6 +75,8 @@ export function AnimatedGifPlaneObject({ url, decorationPresetKey, imageEffectKe
 
       framesRef.current = frames;
       frameCanvasRef.current = frameCanvas;
+      patchCanvasRef.current = patchCanvas;
+      outputCanvasRef.current = outputCanvas;
       animRef.current = { frameIndex: 0, elapsedMs: 0 };
 
       setTexture(tex);
@@ -97,9 +107,13 @@ export function AnimatedGifPlaneObject({ url, decorationPresetKey, imageEffectKe
     const pendingClear = currentFrame.disposalType === 2 ? currentFrame.dims : null;
     anim.frameIndex = (anim.frameIndex + 1) % frames.length;
 
-    drawFrameToCanvas(frameCanvas.getContext("2d"), frames[anim.frameIndex], pendingClear);
-
-    material.map.image = buildFramedCanvas(frameCanvas, decorationPresetKey);
+    drawFrameToCanvas(
+      frameCanvas.getContext("2d"),
+      frames[anim.frameIndex],
+      pendingClear,
+      patchCanvasRef.current,
+    );
+    buildFramedCanvas(frameCanvas, decorationPresetKey, outputCanvasRef.current);
     material.map.needsUpdate = true;
   });
 

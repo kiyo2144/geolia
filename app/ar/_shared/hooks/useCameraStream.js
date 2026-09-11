@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * リアカメラの映像ストリームを <video> 要素へ流すフック。
@@ -40,6 +40,17 @@ export function useCameraStream() {
     }
 
     setIsActive(false);
+  }, []);
+
+  // 画面遷移などでコンポーネントがアンマウントされた際、カメラストリームを
+  // 確実に止める（呼び出し側がstop()し忘れても、端末のカメラが使用中のままに
+  // ならないようにする安全策）。
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      const stream = video?.srcObject;
+      stream?.getTracks?.().forEach((track) => track.stop());
+    };
   }, []);
 
   return { videoRef, start, stop, isActive, error };

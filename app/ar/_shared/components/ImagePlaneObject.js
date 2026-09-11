@@ -16,13 +16,15 @@ const BASE_WIDTH_METERS = 1;
 /**
  * 画像本体を、選択された装飾フレーム込みでcanvasに描画する。
  * フレームなしの場合は画像をそのまま返す。
+ * targetCanvas: 指定した場合、新規canvasを作らずそのcanvasに描き直す
+ * （GIFアニメーションのように毎フレーム呼び出す用途で、canvas要素の量産を防ぐため）。
  */
-export function buildFramedCanvas(image, decorationPresetKey) {
+export function buildFramedCanvas(image, decorationPresetKey, targetCanvas) {
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
+  const canvas = targetCanvas ?? document.createElement("canvas");
 
   if (!decorationPresetKey || decorationPresetKey === "none") {
-    const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     canvas.getContext("2d").drawImage(image, 0, 0, width, height);
@@ -33,7 +35,6 @@ export function buildFramedCanvas(image, decorationPresetKey) {
     const sideMargin = Math.round(width * POLAROID_SIDE_RATIO);
     const topMargin = Math.round(width * POLAROID_TOP_RATIO);
     const bottomMargin = Math.round(width * POLAROID_BOTTOM_RATIO);
-    const canvas = document.createElement("canvas");
     canvas.width = width + sideMargin * 2;
     canvas.height = height + topMargin + bottomMargin;
     const ctx = canvas.getContext("2d");
@@ -45,7 +46,6 @@ export function buildFramedCanvas(image, decorationPresetKey) {
 
   // "white": シンプル白枠
   const margin = Math.round(width * FRAME_MARGIN_RATIO);
-  const canvas = document.createElement("canvas");
   canvas.width = width + margin * 2;
   canvas.height = height + margin * 2;
   const ctx = canvas.getContext("2d");
