@@ -212,6 +212,14 @@ export function ArViewView() {
             {geolocation.error && (
               <p className={styles.error}>位置情報エラー: {geolocation.error.message}</p>
             )}
+            {/* 位置追従の調査用。移動しても現在地・精度がどう変化するかを確認するための
+                一時的な表示（原因切り分けが済んだら削除する）。 */}
+            {geolocation.position && (
+              <p className={styles.status}>
+                緯度 {geolocation.position.lat.toFixed(6)}　経度 {geolocation.position.lng.toFixed(6)}
+                　精度 約{Math.round(geolocation.position.accuracy)}m
+              </p>
+            )}
           </div>
         </>
       )}
