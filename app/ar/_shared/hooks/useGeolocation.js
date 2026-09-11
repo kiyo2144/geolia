@@ -16,6 +16,12 @@ const DEFAULT_POSITION_EMA_ALPHA = 0.25;
 // ため、この値を小さくしてもワープ防止への影響はない。
 const POSITION_UPDATE_THRESHOLD_METERS = 0.2;
 
+// watchPositionのポーリング間隔。iOS Safari等でwatchPositionが実際には新しいfixを
+// 取得せず、直前と同じキャッシュ済みのcoordsを繰り返しコールバックへ渡し続ける不具合が
+// 実機検証で確認されたため、watchPositionではなくgetCurrentPosition(maximumAge:0で
+// キャッシュを無効化)を一定間隔で呼び直す方式にした。
+const WATCH_POLL_INTERVAL_MS = 1000;
+
 // 高度のブレ（不安定さ）を測る際にさかのぼる時間幅。この間に得られた生のGPS高度値の
 // 標準偏差を「その場でのブレ」として使う（画面表示には反映せず、内部計測のみに使う）。
 const ALTITUDE_JITTER_WINDOW_MS = 4000;
@@ -29,7 +35,8 @@ function computeStandardDeviation(values) {
 
 /**
  * 現在地を取得・継続監視するフック。
- * watch: true の場合は watchPosition で継続的に更新し続ける。
+ * watch: true の場合は getCurrentPosition を一定間隔でポーリングして継続的に更新し続ける
+ * （watchPositionはiOS Safari等で新しいfixを取得せず同じcoordsを返し続けることがあるため使わない）。
  *
  * 生のGPS値をそのまま返すと、精度の悪いfixや外れ値によって表示位置が
  * ワープしたように見えるため、精度ゲート・外れ値検知・指数移動平均(EMA)・
@@ -38,7 +45,8 @@ function computeStandardDeviation(values) {
 export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_ALPHA } = {}) {
   const [position, setPosition] = useState(null);
   const [error, setError] = useState(null);
-  const watchIdRef = useRef(null);
+  const watchIdRef = useRef(null); // watch:trueの場合はsetIntervalのid、falseの場合は未使用
+  const isFetchingRef = useRef(false); // ポーリング中に前回のgetCurrentPositionが未応答なら重複起動を防ぐ
 
   // 内部状態（値が変わるたびに再レンダーする必要はないためrefで保持する）
   const smoothedRef = useRef(null); // EMA適用後の最新値
@@ -170,15 +178,27 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
       setError(geoError);
     };
 
-    const options = { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 };
-
     if (watch) {
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        handleSuccess,
-        handleError,
-        options,
-      );
+      const pollOptions = { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 };
+      const poll = () => {
+        if (isFetchingRef.current) return; // 前回のfix取得がまだ終わっていなければ重複起動しない
+        isFetchingRef.current = true;
+        navigator.geolocation.getCurrentPosition(
+          (geoPosition) => {
+            isFetchingRef.current = false;
+            handleSuccess(geoPosition);
+          },
+          (geoError) => {
+            isFetchingRef.current = false;
+            handleError(geoError);
+          },
+          pollOptions,
+        );
+      };
+      poll();
+      watchIdRef.current = setInterval(poll, WATCH_POLL_INTERVAL_MS);
     } else {
+      const options = { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 };
       navigator.geolocation.getCurrentPosition(handleSuccess, handleError, options);
     }
   }, [watch, emaAlpha]);
@@ -186,7 +206,7 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
   useEffect(() => {
     return () => {
       if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
+        clearInterval(watchIdRef.current);
       }
     };
   }, []);
