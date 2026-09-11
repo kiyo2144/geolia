@@ -6,7 +6,10 @@ import { haversineDistanceMeters } from "../../../_shared/lib/geoMath";
 // 位置の平滑化・ワープ防止（要件定義 docs/requirements.md 4.1.1章の初期値）
 const MAX_ACCURACY_METERS = 30; // 精度ゲート: これを超える誤差半径のfixは採用しない
 const MAX_WALK_SPEED_MPS = 3; // 外れ値検知: 徒歩を想定した最大移動速度
-const POSITION_EMA_ALPHA = 0.25; // 平滑化係数
+// 平滑化係数（EMA）のデフォルト値。値が小さいほど滑らかだが追従が遅れる。
+// AR閲覧画面のように「歩いた分だけAR配置が近づいて見える」ことが重要な場面では、
+// 呼び出し側からより大きい値を渡して追従を速める（useGeolocationのemaAlphaオプション）。
+const DEFAULT_POSITION_EMA_ALPHA = 0.25;
 // 描画更新の間引き。AR閲覧画面は歩いてAR配置の周りを回り込む体験のため、
 // 間引きが粗いと少し動いただけでは表示が追従せず「画面に張り付いている」ように
 // 感じられる（実機検証で判明）。AR設置側は設置確定後は自己位置を固定して使う
@@ -32,7 +35,7 @@ function computeStandardDeviation(values) {
  * ワープしたように見えるため、精度ゲート・外れ値検知・指数移動平均(EMA)・
  * 描画間引きを適用した「平滑化後の位置」を返す。
  */
-export function useGeolocation({ watch = true } = {}) {
+export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_ALPHA } = {}) {
   const [position, setPosition] = useState(null);
   const [error, setError] = useState(null);
   const watchIdRef = useRef(null);
@@ -91,14 +94,14 @@ export function useGeolocation({ watch = true } = {}) {
       // 3. 平滑化（指数移動平均）
       const nextSmoothed = previous
         ? {
-            lat: previous.lat + POSITION_EMA_ALPHA * (raw.lat - previous.lat),
-            lng: previous.lng + POSITION_EMA_ALPHA * (raw.lng - previous.lng),
+            lat: previous.lat + emaAlpha * (raw.lat - previous.lat),
+            lng: previous.lng + emaAlpha * (raw.lng - previous.lng),
             altitude:
               raw.altitude === null || raw.altitude === undefined
                 ? previous.altitude
                 : previous.altitude === null || previous.altitude === undefined
                   ? raw.altitude
-                  : previous.altitude + POSITION_EMA_ALPHA * (raw.altitude - previous.altitude),
+                  : previous.altitude + emaAlpha * (raw.altitude - previous.altitude),
             accuracy: raw.accuracy,
             timestamp,
           }
@@ -137,7 +140,7 @@ export function useGeolocation({ watch = true } = {}) {
     } else {
       navigator.geolocation.getCurrentPosition(handleSuccess, handleError, options);
     }
-  }, [watch]);
+  }, [watch, emaAlpha]);
 
   useEffect(() => {
     return () => {

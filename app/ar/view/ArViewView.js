@@ -30,10 +30,15 @@ const VIEW_EXIT_ANGLE_DEGREES = 75; // 詳細→簡易表示へ切り替わる�
 // 至近距離では、カメラの向きが多少ずれていても実物として見えることが多いため、
 // 角度によらず詳細表示の対象にする（要望により追加）。
 const NEAR_DISTANCE_METERS = 30;
+// 現在地の平滑化係数（EMA）。useGeolocationの既定値(0.25)は地図上のマーカー表示など
+// 向けの穏やかな設定だが、AR閲覧では「歩いた分だけAR配置が近づいて見える」ことが
+// 体験上重要なため、既定よりも追従を速くする（実機検証: 既定値だと徒歩中の平滑化の
+// 遅れが数m相当になり、AR配置が自分に付いてくるように見えてしまっていた）。
+const AR_VIEW_POSITION_EMA_ALPHA = 0.6;
 
 export function ArViewView() {
   const supabase = useMemo(() => createClient(), []);
-  const geolocation = useGeolocation({ watch: true });
+  const geolocation = useGeolocation({ watch: true, emaAlpha: AR_VIEW_POSITION_EMA_ALPHA });
   const deviceOrientation = useDeviceOrientation();
   const cameraStream = useCameraStream();
 
