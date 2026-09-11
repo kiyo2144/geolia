@@ -483,7 +483,6 @@ export default function MapView() {
   const [isTouchDevice] = useState(() =>
     typeof window === "undefined" ? false : "ontouchstart" in window || navigator.maxTouchPoints > 0,
   );
-  const [locationEnabled, setLocationEnabled] = useState(true);
   const [locationStatus, setLocationStatus] = useState("");
   const locationWatchIdRef = useRef(null);
   const locationMarkerElRef = useRef(null);
@@ -809,7 +808,6 @@ export default function MapView() {
       setLocationStatus("このブラウザは位置情報の取得に対応していません");
       return;
     }
-    setLocationEnabled(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         applyLocationPosition(position.coords);
@@ -1333,14 +1331,8 @@ export default function MapView() {
   // 高度が取得できる場合はその高度の3次元位置に、取得できない場合は地表面の位置に
   // アイコンが表示される（updateLocationMarkerElement内のprojectAtElevationで判定）。
   useEffect(() => {
-    if (!locationEnabled) {
-      locationPositionRef.current = null;
-      updateLocationMarkerRef.current();
-      if (locationWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(locationWatchIdRef.current);
-        locationWatchIdRef.current = null;
-      }
-      return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      return undefined;
     }
 
     locationWatchIdRef.current = navigator.geolocation.watchPosition(
@@ -1355,7 +1347,7 @@ export default function MapView() {
         locationWatchIdRef.current = null;
       }
     };
-  }, [locationEnabled, applyLocationPosition, handleLocationError]);
+  }, [applyLocationPosition, handleLocationError]);
 
   // 範囲選択（矩形）モード中はカーソルをcrosshairにして分かりやすくする
   useEffect(() => {
@@ -1444,25 +1436,6 @@ export default function MapView() {
 
         <section className={styles.section}>
           <h2>現在地</h2>
-          <label>
-            <input
-              type="checkbox"
-              checked={locationEnabled}
-              onChange={(event) => {
-                const checked = event.target.checked;
-                if (checked && (typeof navigator === "undefined" || !navigator.geolocation)) {
-                  setLocationStatus("このブラウザは位置情報の取得に対応していません");
-                  return;
-                }
-                if (!checked) setLocationStatus("");
-                setLocationEnabled(checked);
-              }}
-            />
-            現在地を表示する
-          </label>
-          <button type="button" onClick={handleLocateClick} className={styles.locateButton}>
-            現在地へ移動
-          </button>
           {locationStatus && <p className={styles.status}>{locationStatus}</p>}
         </section>
 
