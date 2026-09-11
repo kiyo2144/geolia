@@ -225,3 +225,35 @@
   flex: 1;
   min-width: 0;
 }
+
+/* Google マップ風の現在地ボタン（Material Design のFAB相当）。
+   ScaleControl（右下）と重ならないよう、少し上に余白を取って配置する。 */
+.locateFab {
+  position: absolute;
+  z-index: 3;
+  right: 12px;
+  bottom: 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.3),
+    0 0 1px rgba(0, 0, 0, 0.2);
+  transition: background-color 0.15s ease;
+}
+
+.locateFab:hover {
+  background: #f5f5f5;
+}
+
+.locateFab:active {
+  background: #ebebeb;
+}

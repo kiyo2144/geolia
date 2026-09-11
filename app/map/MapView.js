@@ -1625,6 +1625,22 @@ export default function MapView() {
 
       <div ref={mapContainerRef} className={styles.mapContainer} />
 
+      <button
+        type="button"
+        className={styles.locateFab}
+        onClick={handleLocateClick}
+        aria-label="現在地へ移動"
+        title="現在地へ移動"
+      >
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" fill="currentColor" />
+          <path
+            fill="currentColor"
+            d="M12 3a1 1 0 0 1 1 1v1.06A7.002 7.002 0 0 1 18.94 11H20a1 1 0 1 1 0 2h-1.06A7.002 7.002 0 0 1 13 18.94V20a1 1 0 1 1-2 0v-1.06A7.002 7.002 0 0 1 5.06 13H4a1 1 0 1 1 0-2h1.06A7.002 7.002 0 0 1 11 5.06V4a1 1 0 0 1 1-1Zm0 3.9A5.1 5.1 0 1 0 12 17.1 5.1 5.1 0 0 0 12 6.9Z"
+          />
+        </svg>
+      </button>
+
       {firstPersonOrigin && (
         <FirstPersonView
           origin={firstPersonOrigin}
