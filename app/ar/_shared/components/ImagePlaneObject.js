@@ -13,15 +13,29 @@ const POLAROID_BOTTOM_RATIO = 0.22;
 // 画像平面の基準サイズ（横幅1メートル、高さは画像のアスペクト比から算出）
 const BASE_WIDTH_METERS = 1;
 
+// スマートフォンで撮影した写真をそのままテクスチャ化すると、長辺4000px級の
+// 解像度でcanvas 1枚あたり数十MBのメモリを消費する。AR閲覧では複数の配置が
+// 同時に詳細表示され得るため、合計するとiOS Safariのcanvas/テクスチャの
+// メモリ上限を超えてクラッシュする原因になっていた（実機で確認）。AR空間での
+// 表示に必要な解像度は十分小さいため、長辺をこの値まで縮小してから描画する。
+const MAX_TEXTURE_DIMENSION_PX = 1600;
+
+function clampToMaxDimension(width, height) {
+  const scale = Math.min(1, MAX_TEXTURE_DIMENSION_PX / Math.max(width, height));
+  return { width: Math.round(width * scale), height: Math.round(height * scale) };
+}
+
 /**
  * 画像本体を、選択された装飾フレーム込みでcanvasに描画する。
  * フレームなしの場合は画像をそのまま返す。
+ * 元画像がMAX_TEXTURE_DIMENSION_PXより大きい場合は縮小してから描画する。
  * targetCanvas: 指定した場合、新規canvasを作らずそのcanvasに描き直す
  * （GIFアニメーションのように毎フレーム呼び出す用途で、canvas要素の量産を防ぐため）。
  */
 export function buildFramedCanvas(image, decorationPresetKey, targetCanvas) {
-  const width = image.naturalWidth || image.width;
-  const height = image.naturalHeight || image.height;
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  const { width, height } = clampToMaxDimension(naturalWidth, naturalHeight);
   const canvas = targetCanvas ?? document.createElement("canvas");
 
   if (!decorationPresetKey || decorationPresetKey === "none") {
