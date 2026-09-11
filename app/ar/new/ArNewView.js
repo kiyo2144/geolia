@@ -32,17 +32,22 @@ const ELEVATION_SAMPLER_MARGIN_DEGREES = 0.003;
 // 設置面が標高タイルの高度にこれだけ近づいたら、警告表示を出すマージン。
 // GPSの高度誤差は電波状況に左右され、屋内などGPS精度(accuracy)が悪い状況では
 // 標高タイルとの差異が数m以上になることがある一方、屋外の精度の良い状況では
-// 誤差はそれほど大きくない（実機確認）。固定値ではなく、その時点のGPS精度に応じて
-// マージンを動的に決める。
+// 誤差はそれほど大きくない（実機確認）。固定値ではなく、その時点のGPS精度・
+// 高度のブレ（実機確認: accuracyが良くてもブレが大きいケースがあった）の
+// どちらか大きい方に応じてマージンを動的に決める。
 const GROUND_WARNING_MARGIN_MIN_METERS = 1.5;
 const GROUND_WARNING_MARGIN_MAX_METERS = 8;
 // GPSのaccuracy(誤差半径,m)に対してこの倍率でマージンを取る
 const GROUND_WARNING_ACCURACY_FACTOR = 0.5;
+// 高度のブレ（標準偏差,m）に対してこの倍率でマージンを取る
+const GROUND_WARNING_JITTER_FACTOR = 2;
 
-function computeGroundWarningMargin(accuracy) {
-  if (accuracy === null || accuracy === undefined) return GROUND_WARNING_MARGIN_MIN_METERS;
+function computeGroundWarningMargin(accuracy, altitudeJitter) {
+  const accuracyMargin = accuracy === null || accuracy === undefined ? 0 : accuracy * GROUND_WARNING_ACCURACY_FACTOR;
+  const jitterMargin =
+    altitudeJitter === null || altitudeJitter === undefined ? 0 : altitudeJitter * GROUND_WARNING_JITTER_FACTOR;
   return Math.min(
-    Math.max(accuracy * GROUND_WARNING_ACCURACY_FACTOR, GROUND_WARNING_MARGIN_MIN_METERS),
+    Math.max(accuracyMargin, jitterMargin, GROUND_WARNING_MARGIN_MIN_METERS),
     GROUND_WARNING_MARGIN_MAX_METERS,
   );
 }
@@ -297,6 +302,7 @@ export function ArNewView() {
       ...confirmedLatLng,
       altitude: geolocation.position.altitude,
       accuracy: geolocation.position.accuracy,
+      altitudeJitter: geolocation.getAltitudeJitter(),
     });
     setFrozenUserPosition(geolocation.position);
     setAdjustment(DEFAULT_ADJUSTMENT);
@@ -381,9 +387,10 @@ export function ArNewView() {
     setColorInfo("original");
   }, []);
 
-  // その時点のGPS精度に応じた警告マージン（精度が良いほど狭く、悪いほど広くなる）
+  // その時点のGPS精度・高度のブレに応じた警告マージン（精度が良く安定しているほど
+  // 狭く、悪い・不安定なほど広くなる）
   const groundWarningMargin = useMemo(
-    () => computeGroundWarningMargin(placement?.accuracy),
+    () => computeGroundWarningMargin(placement?.accuracy, placement?.altitudeJitter),
     [placement],
   );
 

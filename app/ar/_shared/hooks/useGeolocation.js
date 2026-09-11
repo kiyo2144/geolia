@@ -13,6 +13,17 @@ const POSITION_EMA_ALPHA = 0.25; // 平滑化係数
 // ため、この値を小さくしてもワープ防止への影響はない。
 const POSITION_UPDATE_THRESHOLD_METERS = 0.2;
 
+// 高度のブレ（不安定さ）を測る際にさかのぼる時間幅。この間に得られた生のGPS高度値の
+// 標準偏差を「その場でのブレ」として使う（画面表示には反映せず、内部計測のみに使う）。
+const ALTITUDE_JITTER_WINDOW_MS = 4000;
+
+function computeStandardDeviation(values) {
+  if (values.length < 2) return null;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
 /**
  * 現在地を取得・継続監視するフック。
  * watch: true の場合は watchPosition で継続的に更新し続ける。
@@ -30,6 +41,8 @@ export function useGeolocation({ watch = true } = {}) {
   const smoothedRef = useRef(null); // EMA適用後の最新値
   const lastEmittedRef = useRef(null); // 直近に描画へ反映した値
   const pendingOutlierRef = useRef(null); // 外れ値が実際の移動かどうかの判定用
+  // 直近数秒分の生の高度値（表示には使わず、ブレの計測専用）
+  const recentAltitudeSamplesRef = useRef([]);
 
   const start = useCallback(() => {
     if (!("geolocation" in navigator)) {
@@ -44,6 +57,16 @@ export function useGeolocation({ watch = true } = {}) {
 
       // 1. 精度ゲート
       if (accuracy > MAX_ACCURACY_METERS) return;
+
+      // 高度のブレ計測用に、直近ALTITUDE_JITTER_WINDOW_MS分の生の高度値を保持する
+      // （表示用の平滑化とは別系統。画面には反映しない）
+      if (altitude !== null && altitude !== undefined) {
+        const samples = recentAltitudeSamplesRef.current;
+        samples.push({ altitude, timestamp });
+        while (samples.length > 0 && timestamp - samples[0].timestamp > ALTITUDE_JITTER_WINDOW_MS) {
+          samples.shift();
+        }
+      }
 
       const previous = smoothedRef.current;
       if (previous) {
@@ -124,5 +147,12 @@ export function useGeolocation({ watch = true } = {}) {
     };
   }, []);
 
-  return { position, error, start };
+  // 直近数秒間の生の高度値から標準偏差を計算して返す（画面表示は平滑化した値のまま
+  // 変えず、呼び出し側がAR設置確定などのタイミングで都度取得する想定）。
+  const getAltitudeJitter = useCallback(() => {
+    const values = recentAltitudeSamplesRef.current.map((sample) => sample.altitude);
+    return computeStandardDeviation(values);
+  }, []);
+
+  return { position, error, start, getAltitudeJitter };
 }
