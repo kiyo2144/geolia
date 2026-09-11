@@ -212,7 +212,8 @@ export function ArViewView() {
             {geolocation.error && (
               <p className={styles.error}>位置情報エラー: {geolocation.error.message}</p>
             )}
-            {/* 位置追従の調査用。移動しても現在地・精度がどう変化するかを確認するための
+            {/* 位置追従の調査用。移動しても現在地・精度がどう変化するかと、生fixが
+                精度ゲート・外れ値検知のどちらでどれだけ棄却されているかを確認するための
                 一時的な表示（原因切り分けが済んだら削除する）。 */}
             {geolocation.position && (
               <p className={styles.status}>
@@ -220,6 +221,14 @@ export function ArViewView() {
                 　精度 約{Math.round(geolocation.position.accuracy)}m
               </p>
             )}
+            <p className={styles.status}>
+              生fix {geolocation.debugInfo.rawFixCount}件　採用 {geolocation.debugInfo.acceptedCount}件
+              　精度棄却 {geolocation.debugInfo.accuracyRejectedCount}件　外れ値棄却{" "}
+              {geolocation.debugInfo.outlierRejectedCount}件
+              {geolocation.debugInfo.lastRawAccuracy !== null &&
+                `　直近の生精度 約${Math.round(geolocation.debugInfo.lastRawAccuracy)}m`}
+              {geolocation.debugInfo.lastRejectReason && `　直近の棄却理由: ${geolocation.debugInfo.lastRejectReason}`}
+            </p>
           </div>
         </>
       )}

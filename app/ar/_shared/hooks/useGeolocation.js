@@ -46,6 +46,16 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
   const pendingOutlierRef = useRef(null); // 外れ値が実際の移動かどうかの判定用
   // 直近数秒分の生の高度値（表示には使わず、ブレの計測専用）
   const recentAltitudeSamplesRef = useRef([]);
+  // 位置追従の遅れ・停止の原因切り分け用（一時的な計測。画面表示側で使う）。
+  // watchPositionの生fixが「そもそも来ているか」「どの段階で棄却されているか」を可視化する。
+  const [debugInfo, setDebugInfo] = useState({
+    rawFixCount: 0,
+    acceptedCount: 0,
+    accuracyRejectedCount: 0,
+    outlierRejectedCount: 0,
+    lastRawAccuracy: null,
+    lastRejectReason: null,
+  });
 
   const start = useCallback(() => {
     if (!("geolocation" in navigator)) {
@@ -58,8 +68,17 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
       const timestamp = geoPosition.timestamp;
       const raw = { lat: latitude, lng: longitude, altitude, accuracy, timestamp };
 
+      setDebugInfo((prev) => ({ ...prev, rawFixCount: prev.rawFixCount + 1, lastRawAccuracy: accuracy }));
+
       // 1. 精度ゲート
-      if (accuracy > MAX_ACCURACY_METERS) return;
+      if (accuracy > MAX_ACCURACY_METERS) {
+        setDebugInfo((prev) => ({
+          ...prev,
+          accuracyRejectedCount: prev.accuracyRejectedCount + 1,
+          lastRejectReason: `精度不足(${Math.round(accuracy)}m > ${MAX_ACCURACY_METERS}m)`,
+        }));
+        return;
+      }
 
       // 高度のブレ計測用に、直近ALTITUDE_JITTER_WINDOW_MS分の生の高度値を保持する
       // （表示用の平滑化とは別系統。画面には反映しない）
@@ -84,6 +103,11 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
             pending && haversineDistanceMeters(pending, raw) < Math.max(movedMeters * 0.3, 2);
           pendingOutlierRef.current = raw;
           if (!isConsistentMove) {
+            setDebugInfo((prev) => ({
+              ...prev,
+              outlierRejectedCount: prev.outlierRejectedCount + 1,
+              lastRejectReason: `外れ値(${Math.round(movedMeters)}m/${elapsedSeconds.toFixed(1)}s)`,
+            }));
             return; // 外れ値として棄却し、直前の値を使い続ける
           }
         } else {
@@ -107,6 +131,7 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
           }
         : raw;
       smoothedRef.current = nextSmoothed;
+      setDebugInfo((prev) => ({ ...prev, acceptedCount: prev.acceptedCount + 1 }));
 
       // 4. 描画更新の間引き
       const lastEmitted = lastEmittedRef.current;
@@ -157,5 +182,5 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
     return computeStandardDeviation(values);
   }, []);
 
-  return { position, error, start, getAltitudeJitter };
+  return { position, error, start, getAltitudeJitter, debugInfo };
 }
