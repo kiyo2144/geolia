@@ -55,7 +55,12 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
     outlierRejectedCount: 0,
     lastRawAccuracy: null,
     lastRejectReason: null,
+    lastRawLat: null,
+    lastRawLng: null,
+    lastRawTimestamp: null,
+    sameAsPreviousRawCount: 0, // 生fixが直前と全く同じ座標だった回数（watchPositionのキャッシュ再送の疑い）
   });
+  const lastRawPositionRef = useRef(null);
 
   const start = useCallback(() => {
     if (!("geolocation" in navigator)) {
@@ -68,7 +73,18 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
       const timestamp = geoPosition.timestamp;
       const raw = { lat: latitude, lng: longitude, altitude, accuracy, timestamp };
 
-      setDebugInfo((prev) => ({ ...prev, rawFixCount: prev.rawFixCount + 1, lastRawAccuracy: accuracy }));
+      const lastRaw = lastRawPositionRef.current;
+      const isSameAsPreviousRaw = lastRaw && lastRaw.lat === raw.lat && lastRaw.lng === raw.lng;
+      lastRawPositionRef.current = raw;
+      setDebugInfo((prev) => ({
+        ...prev,
+        rawFixCount: prev.rawFixCount + 1,
+        lastRawAccuracy: accuracy,
+        lastRawLat: raw.lat,
+        lastRawLng: raw.lng,
+        lastRawTimestamp: timestamp,
+        sameAsPreviousRawCount: prev.sameAsPreviousRawCount + (isSameAsPreviousRaw ? 1 : 0),
+      }));
 
       // 1. 精度ゲート
       if (accuracy > MAX_ACCURACY_METERS) {

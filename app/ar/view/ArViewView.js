@@ -229,6 +229,13 @@ export function ArViewView() {
                 `　直近の生精度 約${Math.round(geolocation.debugInfo.lastRawAccuracy)}m`}
               {geolocation.debugInfo.lastRejectReason && `　直近の棄却理由: ${geolocation.debugInfo.lastRejectReason}`}
             </p>
+            {geolocation.debugInfo.lastRawLat !== null && (
+              <p className={styles.status}>
+                生の緯度 {geolocation.debugInfo.lastRawLat.toFixed(6)}　生の経度{" "}
+                {geolocation.debugInfo.lastRawLng.toFixed(6)}　直前と同座標{" "}
+                {geolocation.debugInfo.sameAsPreviousRawCount}回
+              </p>
+            )}
           </div>
         </>
       )}
