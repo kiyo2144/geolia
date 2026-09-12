@@ -179,12 +179,6 @@ const HIRAIZUMI_DATA_BOUNDS = [
   [141.1919757, 39.028813277000005], // 北東
 ];
 
-// パン（地図の移動）を許可する範囲。データ範囲より少し広めに余裕を持たせる。
-const HIRAIZUMI_MAX_BOUNDS = [
-  [140.95, 38.92], // 南西
-  [141.25, 39.06], // 北東
-];
-
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 
 // 現在地マーカーのピン色。地図の傾き・向きに関わらず常に同じ見た目になるよう、
@@ -1001,7 +995,6 @@ export default function MapView() {
     const map = new MapLibreMap({
       container: mapContainerRef.current,
       style: baseStyle("osm"),
-      maxBounds: HIRAIZUMI_MAX_BOUNDS,
       maxPitch: 75,
       ...initialCameraRef.current,
     });
