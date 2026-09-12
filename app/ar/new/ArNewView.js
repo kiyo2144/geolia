@@ -556,37 +556,33 @@ export function ArNewView() {
 
           {(dataFormat === "image" || dataFormat === "gif") && (
             <div className={styles.field}>
-              <p>装飾フレーム</p>
-              <div className={styles.actions}>
-                {DECORATION_OPTIONS.map((option) => (
-                  <label key={option.value}>
-                    <input
-                      type="radio"
-                      name="decorationPreset"
-                      value={option.value}
-                      checked={decorationPresetKey === option.value}
-                      onChange={() => setDecorationPresetKey(option.value)}
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
+              <label className={styles.field}>
+                装飾フレーム
+                <select
+                  value={decorationPresetKey}
+                  onChange={(event) => setDecorationPresetKey(event.target.value)}
+                >
+                  {DECORATION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-              <p>エフェクト</p>
-              <div className={styles.actions}>
-                {IMAGE_EFFECT_OPTIONS.map((option) => (
-                  <label key={option.value}>
-                    <input
-                      type="radio"
-                      name="imageEffect"
-                      value={option.value}
-                      checked={imageEffectKey === option.value}
-                      onChange={() => setImageEffectKey(option.value)}
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
+              <label className={styles.field}>
+                エフェクト
+                <select
+                  value={imageEffectKey}
+                  onChange={(event) => setImageEffectKey(event.target.value)}
+                >
+                  {IMAGE_EFFECT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           )}
 
