@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { FirstPersonView } from "./FirstPersonView";
 import { createElevationSampler } from "./mapMeshBuilders";
 import { ArPlacementPopupContent } from "./ArPlacementPopupContent";
+import { fetchNearbyRoadWays, findNearestWay } from "./roadSegmentMatch";
 import styles from "./MapView.module.css";
 
 // v6は最新すぎてバンドラー環境でのWorker解決やfill-extrusion描画に問題があったため、
@@ -215,6 +216,23 @@ function createFirstPersonPinElement(color) {
 // 重要なスポットとみなし、目立つ色で区別する。
 const BUILDING_COLOR = "#c9b8a3";
 const NAMED_BUILDING_COLOR = "#e0a526";
+
+// 【実験的機能】JARTIC観測点と道路線の対応づけで、これより離れていたら
+// 対応する道路が無いとみなす（誤って無関係な道路をハイライトしないための閾値）
+const ROAD_MATCH_MAX_DISTANCE_METERS = 80;
+
+// JARTIC道路交通量（上り+下り合計台数/5分）の色分け。点・道路ハイライトの両レイヤーで共用する。
+const TRAFFIC_COLOR_EXPRESSION = [
+  "interpolate",
+  ["linear"],
+  ["+", ["get", "upTotal"], ["get", "downTotal"]],
+  0,
+  "#4caf50",
+  100,
+  "#ffc107",
+  250,
+  "#f44336",
+];
 
 function baseStyle(kind) {
   const tile = BASEMAP_TILES[kind];
@@ -686,24 +704,56 @@ export default function MapView() {
 
     if (!latestFlagsRef.current.trafficVisible) {
       map.getSource("traffic-points").setData(EMPTY_FEATURE_COLLECTION);
+      map.getSource("traffic-road-highlight")?.setData(EMPTY_FEATURE_COLLECTION);
       return;
     }
 
     const bounds = map.getBounds();
-    const params = new URLSearchParams({
+    const bbox = {
       minLng: bounds.getWest(),
       minLat: bounds.getSouth(),
       maxLng: bounds.getEast(),
       maxLat: bounds.getNorth(),
-    });
+    };
+    const params = new URLSearchParams(bbox);
+    let trafficData = null;
     try {
       const res = await fetch(`/api/jartic-traffic?${params}`);
-      const data = await res.json();
+      trafficData = await res.json();
       if (res.ok) {
-        map.getSource("traffic-points")?.setData(data);
+        map.getSource("traffic-points")?.setData(trafficData);
       }
     } catch (error) {
       console.error("交通量データの取得に失敗しました:", error);
+    }
+
+    // 【実験的機能】観測点に最も近い道路線を推定してハイライトする。
+    // Overpass APIの混雑等で失敗することがあるが、その場合も観測点（丸マーカー）の
+    // 表示自体には影響させない。
+    if (trafficData?.features?.length) {
+      try {
+        const ways = await fetchNearbyRoadWays(bbox);
+        const highlightFeatures = trafficData.features
+          .map((feature) => {
+            const [lng, lat] = feature.geometry.coordinates[0];
+            const nearestWay = findNearestWay({ lat, lng }, ways, ROAD_MATCH_MAX_DISTANCE_METERS);
+            if (!nearestWay) return null;
+            return {
+              type: "Feature",
+              geometry: { type: "LineString", coordinates: nearestWay.coordinates },
+              properties: feature.properties,
+            };
+          })
+          .filter(Boolean);
+        map.getSource("traffic-road-highlight")?.setData({
+          type: "FeatureCollection",
+          features: highlightFeatures,
+        });
+      } catch (error) {
+        console.error("道路形状の推定表示に失敗しました:", error);
+      }
+    } else {
+      map.getSource("traffic-road-highlight")?.setData(EMPTY_FEATURE_COLLECTION);
     }
   }, []);
 
@@ -1009,23 +1059,29 @@ export default function MapView() {
 
       // JARTIC道路交通量（上り+下りの合計台数/5分で色分け）
       map.addSource("traffic-points", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+
+      // 【実験的機能】観測点に最も近いOpenStreetMapの道路線を推定してハイライトする
+      // （roadSegmentMatch.js参照。公式な区間境界と異なる場合がある近似表示）。
+      map.addSource("traffic-road-highlight", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+      map.addLayer({
+        id: "traffic-road-highlight-line",
+        type: "line",
+        source: "traffic-road-highlight",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 6,
+          "line-color": TRAFFIC_COLOR_EXPRESSION,
+          "line-opacity": 0.85,
+        },
+      });
+
       map.addLayer({
         id: "traffic-points-fill",
         type: "circle",
         source: "traffic-points",
         paint: {
           "circle-radius": 7,
-          "circle-color": [
-            "interpolate",
-            ["linear"],
-            ["+", ["get", "upTotal"], ["get", "downTotal"]],
-            0,
-            "#4caf50",
-            100,
-            "#ffc107",
-            250,
-            "#f44336",
-          ],
+          "circle-color": TRAFFIC_COLOR_EXPRESSION,
           "circle-stroke-width": 1.5,
           "circle-stroke-color": "#fff",
         },
@@ -1371,6 +1427,24 @@ export default function MapView() {
     refreshTraffic();
   }, [trafficVisible, refreshTraffic]);
 
+  // 【実験的機能】推定した道路ハイライトを点滅させる（交通量に応じた強調表現）。
+  // MapLibreに時間経過のアニメーション機能は無いため、line-opacityを一定間隔で
+  // 切り替えることで表現する。
+  useEffect(() => {
+    if (!trafficVisible) return undefined;
+    const map = mapRef.current;
+    if (!map) return undefined;
+
+    let isDim = false;
+    const intervalId = setInterval(() => {
+      if (!map.getLayer("traffic-road-highlight-line")) return;
+      isDim = !isDim;
+      map.setPaintProperty("traffic-road-highlight-line", "line-opacity", isDim ? 0.25 : 0.85);
+    }, 600);
+
+    return () => clearInterval(intervalId);
+  }, [trafficVisible]);
+
   // AR配置ピンの表示オン/オフ
   useEffect(() => {
     refreshArPlacements();
@@ -1524,6 +1598,10 @@ export default function MapView() {
             <p className={styles.status}>
               5分ごとの交通量（上り・下り合計台数）を色分け表示します。データ提供:
               JARTIC（日本道路交通情報センター）
+              <br />
+              ⚠️ 点滅する道路のハイライトは試験的機能です。観測地点に最も近い
+              OpenStreetMap上の道路を推定して表示しているだけで、実際の公式な調査区間とは
+              異なる場合があります。
             </p>
           )}
         </section>
