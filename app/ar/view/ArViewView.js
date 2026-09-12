@@ -13,6 +13,11 @@ import {
   haversineDistanceMeters,
   latLngToLocalMeters,
 } from "../../_shared/lib/geoMath";
+import { createElevationSampler } from "../../map/mapMeshBuilders";
+import {
+  getEffectiveAltitude,
+  isAltitudeUnreliable as checkAltitudeUnreliable,
+} from "../_shared/lib/altitudeReliability";
 import { ArViewScene } from "./ArViewScene";
 import { RadarMinimap } from "./RadarMinimap";
 import styles from "./ArViewView.module.css";
@@ -36,6 +41,12 @@ const NEAR_DISTANCE_METERS = 30;
 // 遅れが数m相当になり、AR配置が自分に付いてくるように見えてしまっていた）。
 const AR_VIEW_POSITION_EMA_ALPHA = 0.6;
 
+// 自己位置の標高タイルサンプラーを取得する範囲（度）。AR設置画面と違い歩き回るため、
+// 少し動くたびに取得し直さずに済むよう広めに取っている（約1km四方）。
+const ELEVATION_SAMPLER_MARGIN_DEGREES = 0.01;
+// 現在地がサンプリング範囲の端に近づく前に、サンプラーを取得し直す目安の距離。
+const ELEVATION_REFRESH_DISTANCE_METERS = 500;
+
 export function ArViewView() {
   const supabase = useMemo(() => createClient(), []);
   const geolocation = useGeolocation({ watch: true, emaAlpha: AR_VIEW_POSITION_EMA_ALPHA });
@@ -45,6 +56,60 @@ export function ArViewView() {
   const [rawPlacements, setRawPlacements] = useState([]);
   const [fetchStatus, setFetchStatus] = useState("");
   const lastFetchPositionRef = useRef(null);
+
+  // 自己位置でのGPS高度の信頼性判定用。標高タイルをサンプリングして、
+  // 現在地の地面の高さ(groundElevationAtUser)を求めておく。
+  const [groundElevationAtUser, setGroundElevationAtUser] = useState(null);
+  const elevationSamplerRef = useRef(null);
+  const lastElevationSamplePositionRef = useRef(null);
+
+  useEffect(() => {
+    const position = geolocation.position;
+    if (!position) return undefined;
+
+    const lastSamplePosition = lastElevationSamplePositionRef.current;
+    if (
+      elevationSamplerRef.current &&
+      lastSamplePosition &&
+      haversineDistanceMeters(lastSamplePosition, position) < ELEVATION_REFRESH_DISTANCE_METERS
+    ) {
+      setGroundElevationAtUser(elevationSamplerRef.current(position.lng, position.lat));
+      return undefined;
+    }
+
+    let isCancelled = false;
+    const margin = ELEVATION_SAMPLER_MARGIN_DEGREES;
+    createElevationSampler({
+      minLng: position.lng - margin,
+      maxLng: position.lng + margin,
+      minLat: position.lat - margin,
+      maxLat: position.lat + margin,
+    })
+      .then((sampler) => {
+        if (isCancelled) return;
+        elevationSamplerRef.current = sampler;
+        lastElevationSamplePositionRef.current = position;
+        setGroundElevationAtUser(sampler(position.lng, position.lat));
+      })
+      .catch(() => {
+        // 標高タイルが取得できなくてもAR閲覧自体は継続できるようにする(高度補正のみ諦める)
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [geolocation.position]);
+
+  // 自己位置のGPS高度が信頼できない場合、代わりに使う高度
+  // （標高タイルの地面 + 人がスマホを構える高さの目安）。
+  const effectiveUserAltitude = useMemo(
+    () => getEffectiveAltitude(geolocation.position?.altitude, groundElevationAtUser),
+    [geolocation.position, groundElevationAtUser],
+  );
+  const isUserAltitudeUnreliable = checkAltitudeUnreliable(
+    geolocation.position?.altitude,
+    groundElevationAtUser,
+  );
 
   const handleStart = async () => {
     geolocation.start();
@@ -110,12 +175,14 @@ export function ArViewView() {
         lng: placement.lng,
       });
       const bearing = bearingDegrees(userPosition, { lat: placement.lat, lng: placement.lng });
+      // 高度差は自己位置の生のGPS高度ではなく、信頼できない場合に補正した
+      // effectiveUserAltitudeを基準にする（AR設置画面と同じ考え方）。
       const verticalOffset =
         placement.altitude !== null &&
         placement.altitude !== undefined &&
-        userPosition.altitude !== null &&
-        userPosition.altitude !== undefined
-          ? placement.altitude - userPosition.altitude
+        effectiveUserAltitude !== null &&
+        effectiveUserAltitude !== undefined
+          ? placement.altitude - effectiveUserAltitude
           : 0;
 
       return {
@@ -127,7 +194,7 @@ export function ArViewView() {
         angleDiff: circularDiffDegrees(bearing, heading),
       };
     });
-  }, [rawPlacements, geolocation.position, deviceHeading]);
+  }, [rawPlacements, geolocation.position, deviceHeading, effectiveUserAltitude]);
 
   // コンパスのノイズによる「視野内」判定のちらつきを抑えるヒステリシス。
   // 一度「詳細表示」になった配置は、より広い角度（VIEW_EXIT_ANGLE_DEGREES）を
@@ -221,6 +288,23 @@ export function ArViewView() {
                 　精度 約{Math.round(geolocation.position.accuracy)}m
               </p>
             )}
+
+            {isUserAltitudeUnreliable && (
+              <p className={styles.error}>
+                GPSの高度精度が低いため、AR配置の高さは目安（3Dマップの標高 + 約1m）で計算しています
+              </p>
+            )}
+
+            {/* 自己位置のGPS高度の信頼性判定のデバッグ表示（原因切り分けが済んだら削除する） */}
+            {geolocation.position && (
+              <p className={styles.status}>
+                生の高度 約{geolocation.position.altitude?.toFixed(2) ?? "?"}m　標高タイル 約
+                {groundElevationAtUser === null ? "?" : groundElevationAtUser.toFixed(2)}m　補正後高度 約
+                {effectiveUserAltitude === null ? "?" : effectiveUserAltitude.toFixed(2)}m　信頼性低判定:{" "}
+                {isUserAltitudeUnreliable ? "YES" : "no"}
+              </p>
+            )}
+
             <p className={styles.status}>
               生fix {geolocation.debugInfo.rawFixCount}件　採用 {geolocation.debugInfo.acceptedCount}件
               　精度棄却 {geolocation.debugInfo.accuracyRejectedCount}件　外れ値棄却{" "}

@@ -15,6 +15,10 @@ import { localMetersToLatLng } from "../../_shared/lib/geoMath";
 import { PlacementLocationMap } from "../../_shared/components/PlacementLocationMap";
 import { createElevationSampler } from "../../map/mapMeshBuilders";
 import {
+  getEffectiveAltitude,
+  isAltitudeUnreliable as checkAltitudeUnreliable,
+} from "../_shared/lib/altitudeReliability";
+import {
   DECORATION_OPTIONS,
   FILE_SIZE_LIMITS_BYTES,
   FILE_SIZE_LIMIT_LABELS,
@@ -73,22 +77,8 @@ const MAX_VERTICAL_DELTA_PER_EVENT_METERS = 0.3;
 // 視野から外れて見えなくなる（地面より下に置けないのと対称の安全策）。
 const MAX_HEIGHT_ABOVE_GROUND_METERS = 30;
 
-// GPS高度の信頼性が低いと判断したときに、代わりに使う「地面から持ち上げて構えている
-// 高さ」の目安（人がスマホを構える高さの概算）。屋内（特にコンクリート造）ではGPS高度が
-// 反射・遮蔽の影響で数十m単位で狂うことがあり、その状態のGPS高度をそのまま設置面の
-// 基準にすると、実際にはあり得ない高さに地面下限が来てしまう。
-const ASSUMED_HAND_HEIGHT_METERS = 1;
-
-// GPS高度が標高タイルより「上」にズレている場合の閾値(メートル)。実機確認では
-// 屋外で1m未満〜屋内で数十m(最大約50m)のズレが見られており、通常の設置(地上付近)
-// では起こりにくい大きさとして間を取った値にしている。上方向は高い建物の上層階など
-// 正当なケースもあり得るため、下方向より緩めにしている。
-const ALTITUDE_ABOVE_TERRAIN_MISMATCH_THRESHOLD_METERS = 15;
-
-// GPS高度が標高タイルより「下」にズレている場合の閾値(メートル)。屋外の地表で
-// GPS高度が標高タイルより数m以上低く出ることは通常あり得ない(地面に埋まっている
-// ことになってしまう)ため、上方向より小さい値で信頼できないと判定する。
-const ALTITUDE_BELOW_TERRAIN_MISMATCH_THRESHOLD_METERS = 3;
+// GPS高度が信用できるかどうか・信用できない場合の代替高度の考え方は
+// AR閲覧画面と共通のため ../_shared/lib/altitudeReliability.js にまとめている。
 
 // 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
 // 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
@@ -387,10 +377,7 @@ export function ArNewView() {
   );
 
   // GPS高度と標高タイルの実際の差(GPS高度をそのまま信じた場合の地面ローカルY)。
-  // 実機確認の結果、GPSが自己申告する精度(accuracy)・高度のブレ(altitudeJitter)は
-  // 良好な値を返しているのに、実際の高度が標高タイルと40m以上ズレるケースがあった。
-  // つまり自己申告の精度からは高度の信頼性を判断できないため、実際のズレの大きさ
-  // そのものを見て判定する。
+  // デバッグ表示用。信頼性の判定自体は altitudeReliability.js 側で行う。
   const rawGroundLocalY = useMemo(() => {
     if (groundElevation === null || !placement || placement.altitude === null || placement.altitude === undefined) {
       return null;
@@ -398,23 +385,14 @@ export function ArNewView() {
     return groundElevation - placement.altitude;
   }, [groundElevation, placement]);
 
-  // 通常、設置場所(地上付近)でのGPS高度と標高タイルの差はここまで大きくならない。
-  // これを超える場合は「GPS高度そのものが信用できない」状態とみなす
-  // （屋内などでGPS高度が数十m単位で狂うケースがこれに該当する）。
-  // rawGroundLocalYが正＝GPS高度が標高タイルより下、負＝上。下方向は地表にいる限り
-  // ほぼあり得ないため閾値を小さく、上方向は高層階等もあり得るため閾値を大きくしている。
-  const isAltitudeUnreliable =
-    rawGroundLocalY !== null &&
-    (rawGroundLocalY > ALTITUDE_BELOW_TERRAIN_MISMATCH_THRESHOLD_METERS ||
-      rawGroundLocalY < -ALTITUDE_ABOVE_TERRAIN_MISMATCH_THRESHOLD_METERS);
+  const isAltitudeUnreliable = checkAltitudeUnreliable(placement?.altitude, groundElevation);
 
   // 設置面の計算に使う高度。GPS高度が信用できない場合は、実際のGPS高度ではなく
   // 「標高タイルの地面 + 人がスマホを構える高さの目安」を代わりに使う。
-  const effectiveAltitude = useMemo(() => {
-    if (!placement || placement.altitude === null || placement.altitude === undefined) return null;
-    if (groundElevation === null) return placement.altitude;
-    return isAltitudeUnreliable ? groundElevation + ASSUMED_HAND_HEIGHT_METERS : placement.altitude;
-  }, [placement, groundElevation, isAltitudeUnreliable]);
+  const effectiveAltitude = useMemo(
+    () => getEffectiveAltitude(placement?.altitude, groundElevation),
+    [placement, groundElevation],
+  );
 
   // 設置面(adjustment.y)の下限。effectiveAltitude + y が標高タイルの高度を
   // 下回らないよう、対応するローカルY座標をあらかじめ求めておく。
