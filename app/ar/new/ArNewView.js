@@ -30,6 +30,10 @@ import {
 import { saveArPlacement } from "../_shared/lib/saveArPlacement";
 import styles from "./ArNewView.module.css";
 
+// GPS高度の原因切り分け用に追加したデバッグ表示の一時的な表示切り替え。
+// 調査が必要になったらtrueに戻す。
+const SHOW_DEBUG_INFO = false;
+
 // 標高タイルサンプラーを取得する範囲（度）。DEM_TILE_ZOOMのタイル1枚で十分覆える広さ。
 const ELEVATION_SAMPLER_MARGIN_DEGREES = 0.003;
 
@@ -750,7 +754,7 @@ export function ArNewView() {
                     )}
 
                     {/* AR配置予定地点のデバッグ表示（原因切り分けが済んだら削除する） */}
-                    {placement && (
+                    {SHOW_DEBUG_INFO && placement && (
                       <p className={styles.adjustHint}>
                         緯度 {placement.lat.toFixed(6)}　経度 {placement.lng.toFixed(6)}
                         　高度{" "}
@@ -761,7 +765,7 @@ export function ArNewView() {
                     )}
 
                     {/* GPS高度の信頼性判定のデバッグ表示（原因切り分けが済んだら削除する） */}
-                    {placement && (
+                    {SHOW_DEBUG_INFO && placement && (
                       <p className={styles.adjustHint}>
                         生の高度 約{placement.altitude?.toFixed(2) ?? "?"}m　GPS精度 約
                         {placement.accuracy?.toFixed(1) ?? "?"}m　高度のブレ 約

@@ -22,6 +22,10 @@ import { ArViewScene } from "./ArViewScene";
 import { RadarMinimap } from "./RadarMinimap";
 import styles from "./ArViewView.module.css";
 
+// 位置追従・GPS高度の原因切り分け用に追加したデバッグ表示の一時的な表示切り替え。
+// 調査が必要になったらtrueに戻す。
+const SHOW_DEBUG_INFO = false;
+
 // 要件定義 docs/requirements.md 4.2.1章の初期値
 const FETCH_RADIUS_METERS = 300; // 段階1: 取得半径
 const FETCH_MAX_COUNT = 100; // 段階1: 取得件数の上限
@@ -282,7 +286,7 @@ export function ArViewView() {
             {/* 位置追従の調査用。移動しても現在地・精度がどう変化するかと、生fixが
                 精度ゲート・外れ値検知のどちらでどれだけ棄却されているかを確認するための
                 一時的な表示（原因切り分けが済んだら削除する）。 */}
-            {geolocation.position && (
+            {SHOW_DEBUG_INFO && geolocation.position && (
               <p className={styles.status}>
                 緯度 {geolocation.position.lat.toFixed(6)}　経度 {geolocation.position.lng.toFixed(6)}
                 　精度 約{Math.round(geolocation.position.accuracy)}m
@@ -296,7 +300,7 @@ export function ArViewView() {
             )}
 
             {/* 自己位置のGPS高度の信頼性判定のデバッグ表示（原因切り分けが済んだら削除する） */}
-            {geolocation.position && (
+            {SHOW_DEBUG_INFO && geolocation.position && (
               <p className={styles.status}>
                 生の高度 約{geolocation.position.altitude?.toFixed(2) ?? "?"}m　標高タイル 約
                 {groundElevationAtUser === null ? "?" : groundElevationAtUser.toFixed(2)}m　補正後高度 約
@@ -305,15 +309,18 @@ export function ArViewView() {
               </p>
             )}
 
-            <p className={styles.status}>
-              生fix {geolocation.debugInfo.rawFixCount}件　採用 {geolocation.debugInfo.acceptedCount}件
-              　精度棄却 {geolocation.debugInfo.accuracyRejectedCount}件　外れ値棄却{" "}
-              {geolocation.debugInfo.outlierRejectedCount}件
-              {geolocation.debugInfo.lastRawAccuracy !== null &&
-                `　直近の生精度 約${Math.round(geolocation.debugInfo.lastRawAccuracy)}m`}
-              {geolocation.debugInfo.lastRejectReason && `　直近の棄却理由: ${geolocation.debugInfo.lastRejectReason}`}
-            </p>
-            {geolocation.debugInfo.lastRawLat !== null && (
+            {SHOW_DEBUG_INFO && (
+              <p className={styles.status}>
+                生fix {geolocation.debugInfo.rawFixCount}件　採用 {geolocation.debugInfo.acceptedCount}件
+                　精度棄却 {geolocation.debugInfo.accuracyRejectedCount}件　外れ値棄却{" "}
+                {geolocation.debugInfo.outlierRejectedCount}件
+                {geolocation.debugInfo.lastRawAccuracy !== null &&
+                  `　直近の生精度 約${Math.round(geolocation.debugInfo.lastRawAccuracy)}m`}
+                {geolocation.debugInfo.lastRejectReason &&
+                  `　直近の棄却理由: ${geolocation.debugInfo.lastRejectReason}`}
+              </p>
+            )}
+            {SHOW_DEBUG_INFO && geolocation.debugInfo.lastRawLat !== null && (
               <p className={styles.status}>
                 生の緯度 {geolocation.debugInfo.lastRawLat.toFixed(6)}　生の経度{" "}
                 {geolocation.debugInfo.lastRawLng.toFixed(6)}　直前と同座標{" "}
