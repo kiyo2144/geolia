@@ -16,6 +16,16 @@ const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 // JARTICの観測対象（高速自動車国道・一般国道）におおむね対応する道路種別のみに絞る
 const HIGHWAY_TYPES = "motorway|trunk|primary|secondary|tertiary|motorway_link|trunk_link|primary_link";
 const EARTH_RADIUS_METERS = 6378137;
+// 公開Overpass APIは混雑時に429(レート制限)・504(タイムアウト)を返すことがあり、
+// 実機確認でも発生した。一時的な混雑であることが多いため、短い間隔で数回だけ
+// リトライする（呼び出し側にエラーをそのまま伝えると、この間は常に「何も表示され
+// ない」状態になってしまうため）。
+const FETCH_RETRY_COUNT = 2;
+const FETCH_RETRY_DELAY_MS = 1500;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
@@ -42,20 +52,30 @@ function toLocalMeters(origin, point) {
  */
 export async function fetchNearbyRoadWays(bbox) {
   const query = `[out:json][timeout:20];way[highway~"^(${HIGHWAY_TYPES})$"](${bbox.minLat},${bbox.minLng},${bbox.maxLat},${bbox.maxLng});out geom;`;
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    body: `data=${encodeURIComponent(query)}`,
-  });
-  if (!res.ok) throw new Error(`Overpass APIの取得に失敗しました: ${res.status}`);
-  const data = await res.json();
-  return (data.elements ?? [])
-    .filter((el) => el.type === "way" && Array.isArray(el.geometry) && Array.isArray(el.nodes))
-    .map((el) => ({
-      id: el.id,
-      nodeIds: el.nodes,
-      tags: el.tags ?? {},
-      coordinates: el.geometry.map((g) => [g.lon, g.lat]),
-    }));
+
+  let lastError;
+  for (let attempt = 0; attempt <= FETCH_RETRY_COUNT; attempt++) {
+    if (attempt > 0) await sleep(FETCH_RETRY_DELAY_MS);
+    try {
+      const res = await fetch(OVERPASS_URL, {
+        method: "POST",
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!res.ok) throw new Error(`Overpass APIの取得に失敗しました: ${res.status}`);
+      const data = await res.json();
+      return (data.elements ?? [])
+        .filter((el) => el.type === "way" && Array.isArray(el.geometry) && Array.isArray(el.nodes))
+        .map((el) => ({
+          id: el.id,
+          nodeIds: el.nodes,
+          tags: el.tags ?? {},
+          coordinates: el.geometry.map((g) => [g.lon, g.lat]),
+        }));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 // 点pointから線分(a-b)までの最短距離（メートル）を求める（origin基準のローカル平面近似）

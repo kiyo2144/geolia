@@ -716,19 +716,18 @@ export default function MapView() {
     try {
       const res = await fetch(`/api/jartic-traffic?${params}`);
       trafficData = await res.json();
-      if (res.ok) {
-        map.getSource("traffic-points")?.setData(trafficData);
-      }
     } catch (error) {
       console.error("交通量データの取得に失敗しました:", error);
     }
 
     // 【実験的機能】観測点に対応する道路の区間（つながる同一路線のwayを連結した範囲）を
-    // 推定してハイライトする。Overpass APIの混雑等で失敗することがあるが、その場合も
-    // 交通量データ自体の取得には影響させない。
+    // 推定してハイライトする。対応する道路が見つからない観測点や、Overpass APIの
+    // 混雑等でハイライト自体が取得できなかった場合は、その観測点だけ丸マーカー
+    // （traffic-points）で表示する（「何も表示されない」状態を避けるための保険）。
     if (trafficData?.features?.length) {
       try {
         const ways = await fetchNearbyRoadWays(bbox);
+        const unmatchedFeatures = [];
         const highlightFeatures = trafficData.features
           .map((feature) => {
             const [lng, lat] = feature.geometry.coordinates[0];
@@ -737,7 +736,10 @@ export default function MapView() {
               ways,
               { maxMatchDistanceMeters: ROAD_MATCH_MAX_DISTANCE_METERS, maxSegmentLengthMeters: ROAD_HIGHLIGHT_MAX_LENGTH_METERS },
             );
-            if (!segment) return null;
+            if (!segment) {
+              unmatchedFeatures.push(feature);
+              return null;
+            }
             return {
               type: "Feature",
               geometry: { type: "LineString", coordinates: segment.coordinates },
@@ -749,11 +751,16 @@ export default function MapView() {
           type: "FeatureCollection",
           features: highlightFeatures,
         });
+        map.getSource("traffic-points")?.setData({ type: "FeatureCollection", features: unmatchedFeatures });
       } catch (error) {
         console.error("道路形状の推定表示に失敗しました:", error);
+        // ハイライトが丸ごと取得できなかった場合は、全観測点を丸マーカーで表示する
+        map.getSource("traffic-road-highlight")?.setData(EMPTY_FEATURE_COLLECTION);
+        map.getSource("traffic-points")?.setData(trafficData);
       }
     } else {
       map.getSource("traffic-road-highlight")?.setData(EMPTY_FEATURE_COLLECTION);
+      map.getSource("traffic-points")?.setData(EMPTY_FEATURE_COLLECTION);
     }
   }, []);
 
@@ -1057,10 +1064,23 @@ export default function MapView() {
       });
 
       // JARTIC道路交通量（上り+下りの合計台数/5分で色分け）。
-      // このソース自体は画面に表示せず、対応する道路区間を探すための入力としてのみ使う
-      // （表示は下のtraffic-road-highlight-line。「マーカーではなく道路そのものを
-      // ハイライトしたい」という要望により、丸マーカー表示は廃止した）。
+      // 「マーカーではなく道路そのものをハイライトしたい」という要望により、
+      // 対応する道路区間が見つかった観測点はtraffic-road-highlight-lineのみで表示する。
+      // このtraffic-points-fillは、道路との対応づけに失敗した観測点（近くに該当する
+      // 道路が無い、またはOverpass APIの不調でハイライト自体が取得できなかった場合）
+      // だけを映す保険用のレイヤーで、通常時は空になる想定。
       map.addSource("traffic-points", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+      map.addLayer({
+        id: "traffic-points-fill",
+        type: "circle",
+        source: "traffic-points",
+        paint: {
+          "circle-radius": 7,
+          "circle-color": TRAFFIC_COLOR_EXPRESSION,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#fff",
+        },
+      });
 
       // 【実験的機能】観測点に対応する道路区間を推定してハイライトする
       // （roadSegmentMatch.js参照。公式な区間境界と異なる場合がある近似表示）。
@@ -1110,6 +1130,7 @@ export default function MapView() {
         "buildings-fill-a",
         "buildings-fill-b",
         "traffic-road-highlight-line",
+        "traffic-points-fill",
       ].filter((id) => map.getLayer(id));
       const features = layerIds.length ? map.queryRenderedFeatures(event.point, { layers: layerIds }) : [];
 
@@ -1140,6 +1161,9 @@ export default function MapView() {
       } else if (feature.layer.id === "traffic-road-highlight-line") {
         const p = feature.properties;
         html = `<b>道路交通量</b><br>${p.roadTypeLabel}<br>上り ${p.upTotal}台／下り ${p.downTotal}台（5分間）<br>観測時刻 ${formatJarticTimeCode(p.timeCode)}<br><span style="font-size:11px;color:#888;">出典: JARTIC（日本道路交通情報センター）、道路形状: OpenStreetMap（推定）</span>`;
+      } else if (feature.layer.id === "traffic-points-fill") {
+        const p = feature.properties;
+        html = `<b>道路交通量</b><br>${p.roadTypeLabel}<br>上り ${p.upTotal}台／下り ${p.downTotal}台（5分間）<br>観測時刻 ${formatJarticTimeCode(p.timeCode)}<br><span style="font-size:11px;color:#888;">出典: JARTIC（日本道路交通情報センター）<br>※対応する道路形状が見つからなかったため地点で表示しています</span>`;
       } else if (feature.layer.id.startsWith("land-fill")) {
         const p = feature.properties;
         html = `<b>地籍筆</b><br>小字 ${p.koaza_name ?? "-"}　地番 ${p.chiban ?? "-"}<br>精度区分 ${p.precision_class ?? "-"}`;
