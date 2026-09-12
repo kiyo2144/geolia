@@ -720,6 +720,16 @@ export function ArNewView() {
                       </p>
                     )}
 
+                    {/* AR配置予定地点のデバッグ表示（原因切り分けが済んだら削除する） */}
+                    {placement && (
+                      <p className={styles.adjustHint}>
+                        緯度 {placement.lat.toFixed(6)}　経度 {placement.lng.toFixed(6)}
+                        　高度{" "}
+                        {finalAltitude === null ? "取得できませんでした" : `約${finalAltitude.toFixed(2)}m`}
+                        {groundLocalY !== null && `（地面比 約${adjustment.y.toFixed(2)}m）`}
+                      </p>
+                    )}
+
                     {isNearGround && (
                       <p className={styles.groundWarning}>地面より下には設置できません</p>
                     )}
