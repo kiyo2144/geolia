@@ -73,6 +73,12 @@ const MAX_VERTICAL_DELTA_PER_EVENT_METERS = 0.3;
 // 視野から外れて見えなくなる（地面より下に置けないのと対称の安全策）。
 const MAX_HEIGHT_ABOVE_GROUND_METERS = 30;
 
+// GPS高度の信頼性が低いと判断したときに、代わりに使う「地面から持ち上げて構えている
+// 高さ」の目安（人がスマホを構える高さの概算）。屋内（特にコンクリート造）ではGPS高度が
+// 反射・遮蔽の影響で数十m単位で狂うことがあり、その状態のGPS高度をそのまま設置面の
+// 基準にすると、実際にはあり得ない高さに地面下限が来てしまう。
+const ASSUMED_HAND_HEIGHT_METERS = 1;
+
 // 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
 // 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
 const GESTURE_SENSITIVITY_MULTIPLIERS = { image: 2.5, gif: 2.5 };
@@ -362,14 +368,32 @@ export function ArNewView() {
     [dataFormat],
   );
 
-  // 設置面(adjustment.y)の下限。placement.altitude + y が標高タイルの高度を
+  // その時点のGPS精度・高度のブレに応じた警告マージン（精度が良く安定しているほど
+  // 狭く、悪い・不安定なほど広くなる）
+  const groundWarningMargin = useMemo(
+    () => computeGroundWarningMargin(placement?.accuracy, placement?.altitudeJitter),
+    [placement],
+  );
+
+  // マージンが上限(GROUND_WARNING_MARGIN_MAX_METERS)まで振り切れているときは、
+  // 「多少ブレている」ではなく「GPS高度そのものが信用できない」状態とみなす
+  // （屋内などでGPS高度が数十m単位で狂うケースがこれに該当する）。
+  const isAltitudeUnreliable = groundWarningMargin >= GROUND_WARNING_MARGIN_MAX_METERS;
+
+  // 設置面の計算に使う高度。GPS高度が信用できない場合は、実際のGPS高度ではなく
+  // 「標高タイルの地面 + 人がスマホを構える高さの目安」を代わりに使う。
+  const effectiveAltitude = useMemo(() => {
+    if (!placement || placement.altitude === null || placement.altitude === undefined) return null;
+    if (groundElevation === null) return placement.altitude;
+    return isAltitudeUnreliable ? groundElevation + ASSUMED_HAND_HEIGHT_METERS : placement.altitude;
+  }, [placement, groundElevation, isAltitudeUnreliable]);
+
+  // 設置面(adjustment.y)の下限。effectiveAltitude + y が標高タイルの高度を
   // 下回らないよう、対応するローカルY座標をあらかじめ求めておく。
   const groundLocalY = useMemo(() => {
-    if (groundElevation === null || !placement || placement.altitude === null || placement.altitude === undefined) {
-      return null;
-    }
-    return groundElevation - placement.altitude;
-  }, [groundElevation, placement]);
+    if (groundElevation === null || effectiveAltitude === null) return null;
+    return groundElevation - effectiveAltitude;
+  }, [groundElevation, effectiveAltitude]);
 
   const handleVertical = useCallback(
     (deltaY) => {
@@ -419,13 +443,6 @@ export function ArNewView() {
     setColorInfo("original");
   }, []);
 
-  // その時点のGPS精度・高度のブレに応じた警告マージン（精度が良く安定しているほど
-  // 狭く、悪い・不安定なほど広くなる）
-  const groundWarningMargin = useMemo(
-    () => computeGroundWarningMargin(placement?.accuracy, placement?.altitudeJitter),
-    [placement],
-  );
-
   // 設置面が標高タイルの高度に近づいている(または下限に達している)かどうか
   const isNearGround = groundLocalY !== null && adjustment.y <= groundLocalY + groundWarningMargin;
 
@@ -437,14 +454,13 @@ export function ArNewView() {
     onGestureModeChange: handleGestureModeChange,
   });
 
-  // 設置場所確定時の高度（デバイスの高度）に、微調整の上下オフセットを加えたものを
+  // 設置場所確定時の高度（GPS高度が信用できる場合はそれ、できない場合は
+  // effectiveAltitudeで代替した値）に、微調整の上下オフセットを加えたものを
   // 最終的な保存用の高度とする。高度自体が取得できていない場合はnullのまま保存する。
   const finalAltitude = useMemo(() => {
-    if (!placement || placement.altitude === null || placement.altitude === undefined) {
-      return null;
-    }
-    return placement.altitude + adjustment.y;
-  }, [placement, adjustment.y]);
+    if (effectiveAltitude === null) return null;
+    return effectiveAltitude + adjustment.y;
+  }, [effectiveAltitude, adjustment.y]);
 
   const handleSave = useCallback(async () => {
     if (!dataFile || !placement) return;
@@ -744,6 +760,12 @@ export function ArNewView() {
 
                     {isNearGround && (
                       <p className={styles.groundWarning}>地面より下には設置できません</p>
+                    )}
+
+                    {isAltitudeUnreliable && (
+                      <p className={styles.groundWarning}>
+                        GPSの高度精度が低いため、地面の高さは目安（3Dマップの標高 + 約1m）で計算しています
+                      </p>
                     )}
 
                     {dataUrl && colorInfo && (
