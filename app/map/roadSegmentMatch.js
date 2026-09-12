@@ -36,7 +36,9 @@ function toLocalMeters(origin, point) {
 /**
  * 指定範囲内の主要道路（線形状）をOverpass APIから取得する。
  * bbox: { minLng, minLat, maxLng, maxLat }
- * 戻り値: [{ id, coordinates: [[lng,lat], ...] }, ...]
+ * 戻り値: [{ id, nodeIds, tags, coordinates: [[lng,lat], ...] }, ...]
+ * nodeIds（OSMのノードID列）は、隣接するway同士のつながりを判定するために使う
+ * （区間の延長処理・buildHighlightedSegment参照）。
  */
 export async function fetchNearbyRoadWays(bbox) {
   const query = `[out:json][timeout:20];way[highway~"^(${HIGHWAY_TYPES})$"](${bbox.minLat},${bbox.minLng},${bbox.maxLat},${bbox.maxLng});out geom;`;
@@ -47,9 +49,11 @@ export async function fetchNearbyRoadWays(bbox) {
   if (!res.ok) throw new Error(`Overpass APIの取得に失敗しました: ${res.status}`);
   const data = await res.json();
   return (data.elements ?? [])
-    .filter((el) => el.type === "way" && Array.isArray(el.geometry))
+    .filter((el) => el.type === "way" && Array.isArray(el.geometry) && Array.isArray(el.nodes))
     .map((el) => ({
       id: el.id,
+      nodeIds: el.nodes,
+      tags: el.tags ?? {},
       coordinates: el.geometry.map((g) => [g.lon, g.lat]),
     }));
 }
@@ -97,4 +101,83 @@ export function findNearestWay(point, ways, maxDistanceMeters) {
   }
 
   return nearestDistance <= maxDistanceMeters ? nearest : null;
+}
+
+// 2点間の直線距離（メートル、緯度経度の小さな範囲向けの平面近似）
+function haversineApproxMeters(a, b) {
+  const midLatRad = toRadians((a[1] + b[1]) / 2);
+  const dx = toRadians(b[0] - a[0]) * EARTH_RADIUS_METERS * Math.cos(midLatRad);
+  const dy = toRadians(b[1] - a[1]) * EARTH_RADIUS_METERS;
+  return Math.hypot(dx, dy);
+}
+
+function wayLengthMeters(coordinates) {
+  let total = 0;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    total += haversineApproxMeters(coordinates[i], coordinates[i + 1]);
+  }
+  return total;
+}
+
+// 路線を識別するためのキー。ref（路線番号、例:"4"）を優先し、無ければname（路線名）を使う
+function waySignature(way) {
+  return way.tags?.ref ?? way.tags?.name ?? null;
+}
+
+/**
+ * pointに最も近い道路線を起点に、同じ路線（ref/nameが一致）でノードがつながっている
+ * 隣接 way を両端方向にたどって連結し、1本の長い区間として返す
+ * （「区間の範囲」を、単一の短いway断片ではなく、ある程度の長さのまとまりとして
+ * 表現するための処理。maxSegmentLengthMetersを超えたら延長を打ち切る）。
+ * マッチする道路が無ければnullを返す。
+ */
+export function buildHighlightedSegment(point, ways, options = {}) {
+  const { maxMatchDistanceMeters = 80, maxSegmentLengthMeters = 1500 } = options;
+
+  const nearestWay = findNearestWay(point, ways, maxMatchDistanceMeters);
+  if (!nearestWay) return null;
+
+  let coordinates = [...nearestWay.coordinates];
+  let startNode = nearestWay.nodeIds[0];
+  let endNode = nearestWay.nodeIds[nearestWay.nodeIds.length - 1];
+  const usedIds = new Set([nearestWay.id]);
+
+  const signature = waySignature(nearestWay);
+  if (signature) {
+    const candidates = ways.filter((way) => way.id !== nearestWay.id && waySignature(way) === signature);
+    let length = wayLengthMeters(coordinates);
+    let extended = true;
+
+    while (extended && length < maxSegmentLengthMeters) {
+      extended = false;
+      for (const way of candidates) {
+        if (usedIds.has(way.id)) continue;
+        const wayStartNode = way.nodeIds[0];
+        const wayEndNode = way.nodeIds[way.nodeIds.length - 1];
+
+        if (wayStartNode === endNode) {
+          coordinates = coordinates.concat(way.coordinates.slice(1));
+          endNode = wayEndNode;
+        } else if (wayEndNode === endNode) {
+          coordinates = coordinates.concat([...way.coordinates].reverse().slice(1));
+          endNode = wayStartNode;
+        } else if (wayEndNode === startNode) {
+          coordinates = way.coordinates.slice(0, -1).concat(coordinates);
+          startNode = wayStartNode;
+        } else if (wayStartNode === startNode) {
+          coordinates = [...way.coordinates].reverse().slice(0, -1).concat(coordinates);
+          startNode = wayEndNode;
+        } else {
+          continue;
+        }
+
+        usedIds.add(way.id);
+        length += wayLengthMeters(way.coordinates);
+        extended = true;
+        break;
+      }
+    }
+  }
+
+  return { coordinates, matchedWayId: nearestWay.id };
 }
