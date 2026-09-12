@@ -758,6 +758,17 @@ export function ArNewView() {
                       </p>
                     )}
 
+                    {/* GPS高度の信頼性判定のデバッグ表示（原因切り分けが済んだら削除する） */}
+                    {placement && (
+                      <p className={styles.adjustHint}>
+                        生の高度 約{placement.altitude?.toFixed(2) ?? "?"}m　GPS精度 約
+                        {placement.accuracy?.toFixed(1) ?? "?"}m　高度のブレ 約
+                        {placement.altitudeJitter?.toFixed(2) ?? "?"}m　警告マージン 約
+                        {groundWarningMargin.toFixed(2)}m　信頼性低判定:{" "}
+                        {isAltitudeUnreliable ? "YES" : "no"}
+                      </p>
+                    )}
+
                     {isNearGround && (
                       <p className={styles.groundWarning}>地面より下には設置できません</p>
                     )}
