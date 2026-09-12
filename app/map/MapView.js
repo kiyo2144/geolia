@@ -359,6 +359,12 @@ function swapBufferData(map, key, bufferRef, data) {
   });
 }
 
+// JARTIC交通量APIの時間コード（例: 202609121745）を読みやすい表記に変換する
+function formatJarticTimeCode(timeCode) {
+  const s = String(timeCode);
+  return `${s.slice(0, 4)}/${s.slice(4, 6)}/${s.slice(6, 8)} ${s.slice(8, 10)}:${s.slice(10, 12)}`;
+}
+
 function clearBufferData(map, key, bufferRef) {
   const activeBuffer = bufferRef.current;
   map.getSource(`${key}-${activeBuffer}`)?.setData(EMPTY_FEATURE_COLLECTION);
@@ -472,6 +478,7 @@ export default function MapView() {
   const [forestVisible, setForestVisible] = useState(true);
   const [landVisible, setLandVisible] = useState(false);
   const [buildingsVisible, setBuildingsVisible] = useState(true);
+  const [trafficVisible, setTrafficVisible] = useState(false);
   const [landColorMode, setLandColorMode] = useState("koaza");
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [terrainExaggeration, setTerrainExaggeration] = useState(1.5);
@@ -593,10 +600,10 @@ export default function MapView() {
     };
   }, [firstPersonPendingOrigin]);
 
-  const latestFlagsRef = useRef({ forestVisible, landVisible, buildingsVisible });
+  const latestFlagsRef = useRef({ forestVisible, landVisible, buildingsVisible, trafficVisible });
   useEffect(() => {
-    latestFlagsRef.current = { forestVisible, landVisible, buildingsVisible };
-  }, [forestVisible, landVisible, buildingsVisible]);
+    latestFlagsRef.current = { forestVisible, landVisible, buildingsVisible, trafficVisible };
+  }, [forestVisible, landVisible, buildingsVisible, trafficVisible]);
 
   const terrainEnabledRef = useRef(terrainEnabled);
   useEffect(() => {
@@ -670,6 +677,35 @@ export default function MapView() {
     await Promise.all(tasks);
     setStatus("");
   }, [supabase]);
+
+  // JARTIC（道路交通情報センター）の交通量データ。外部APIかつ更新頻度が5分単位のため、
+  // 森林簿・地籍等とは別の軽量な単一ソース（バッファ切り替えなし）で扱う。
+  const refreshTraffic = useCallback(async () => {
+    const map = mapRef.current;
+    if (!map || !map.getSource("traffic-points")) return;
+
+    if (!latestFlagsRef.current.trafficVisible) {
+      map.getSource("traffic-points").setData(EMPTY_FEATURE_COLLECTION);
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const params = new URLSearchParams({
+      minLng: bounds.getWest(),
+      minLat: bounds.getSouth(),
+      maxLng: bounds.getEast(),
+      maxLat: bounds.getNorth(),
+    });
+    try {
+      const res = await fetch(`/api/jartic-traffic?${params}`);
+      const data = await res.json();
+      if (res.ok) {
+        map.getSource("traffic-points")?.setData(data);
+      }
+    } catch (error) {
+      console.error("交通量データの取得に失敗しました:", error);
+    }
+  }, []);
 
   // 現在の表示範囲の標高タイルを取得・デコードし、現在地・AR配置ピンの地表面の
   // 高さ算出に使うサンプラーを更新する（map.queryTerrainElevation()を使わない理由は
@@ -970,8 +1006,34 @@ export default function MapView() {
         source: selectionRectSourceId,
         paint: { "line-color": "#1e88e5", "line-width": 2 },
       });
+
+      // JARTIC道路交通量（上り+下りの合計台数/5分で色分け）
+      map.addSource("traffic-points", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+      map.addLayer({
+        id: "traffic-points-fill",
+        type: "circle",
+        source: "traffic-points",
+        paint: {
+          "circle-radius": 7,
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["+", ["get", "upTotal"], ["get", "downTotal"]],
+            0,
+            "#4caf50",
+            100,
+            "#ffc107",
+            250,
+            "#f44336",
+          ],
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#fff",
+        },
+      });
+
       refreshData();
       refreshArPlacements();
+      refreshTraffic();
       refreshElevationSampler();
     };
 
@@ -987,6 +1049,7 @@ export default function MapView() {
       debounceTimer = setTimeout(() => {
         refreshData();
         refreshArPlacements();
+        refreshTraffic();
         refreshElevationSampler();
       }, 300);
     });
@@ -1000,6 +1063,7 @@ export default function MapView() {
         "land-fill-b",
         "buildings-fill-a",
         "buildings-fill-b",
+        "traffic-points-fill",
       ].filter((id) => map.getLayer(id));
       const features = layerIds.length ? map.queryRenderedFeatures(event.point, { layers: layerIds }) : [];
 
@@ -1027,7 +1091,10 @@ export default function MapView() {
           ? `<span style="font-size:11px;color:${NAMED_BUILDING_COLOR};">注目スポット</span><br>`
           : "";
         html = `${spotBadge}<b>${p.name ?? "建物"}</b><br>高さ ${heightText}<br><span style="font-size:11px;color:#888;">出典: OpenStreetMap</span>`;
-      } else {
+      } else if (feature.layer.id === "traffic-points-fill") {
+        const p = feature.properties;
+        html = `<b>道路交通量</b><br>${p.roadTypeLabel}<br>上り ${p.upTotal}台／下り ${p.downTotal}台（5分間）<br>観測時刻 ${formatJarticTimeCode(p.timeCode)}<br><span style="font-size:11px;color:#888;">出典: JARTIC（日本道路交通情報センター）</span>`;
+      } else if (feature.layer.id.startsWith("land-fill")) {
         const p = feature.properties;
         html = `<b>地籍筆</b><br>小字 ${p.koaza_name ?? "-"}　地番 ${p.chiban ?? "-"}<br>精度区分 ${p.precision_class ?? "-"}`;
       }
@@ -1300,6 +1367,10 @@ export default function MapView() {
     refreshData();
   }, [forestVisible, landVisible, buildingsVisible, refreshData]);
 
+  useEffect(() => {
+    refreshTraffic();
+  }, [trafficVisible, refreshTraffic]);
+
   // AR配置ピンの表示オン/オフ
   useEffect(() => {
     refreshArPlacements();
@@ -1439,6 +1510,20 @@ export default function MapView() {
               名称が登録されている建物（注目スポット）は
               <span style={{ color: NAMED_BUILDING_COLOR, fontWeight: 700 }}>オレンジ色</span>
               で表示されます
+            </p>
+          )}
+          <label>
+            <input
+              type="checkbox"
+              checked={trafficVisible}
+              onChange={(event) => setTrafficVisible(event.target.checked)}
+            />
+            道路交通量（JARTIC）
+          </label>
+          {trafficVisible && (
+            <p className={styles.status}>
+              5分ごとの交通量（上り・下り合計台数）を色分け表示します。データ提供:
+              JARTIC（日本道路交通情報センター）
             </p>
           )}
         </section>
