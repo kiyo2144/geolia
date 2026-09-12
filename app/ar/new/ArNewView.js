@@ -60,6 +60,18 @@ const VERTICAL_METERS_PER_PIXEL = 0.01;
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 50;
 
+// タッチイベント1回あたりで高さを動かせる量の上限(メートル)。指の本数の変化や
+// 端末側のタッチ座標の乱れなどで1回のイベントに異常に大きいdeltaYが来た場合に、
+// 高さがその分だけ一気に(カメラ映像外の上空まで)吹っ飛ばないよう、常に小刻みにしか
+// 動かないようにするための安全弁。通常のスワイプ操作では毎フレームの移動量は
+// これよりずっと小さいため、体感の操作感には影響しない。
+const MAX_VERTICAL_DELTA_PER_EVENT_METERS = 0.3;
+
+// 地面(groundLocalY)からこの高さまでしか持ち上げられないようにする上限。
+// これが無いと、繰り返しスワイプすればどこまでも上げられてしまい、カメラの
+// 視野から外れて見えなくなる（地面より下に置けないのと対称の安全策）。
+const MAX_HEIGHT_ABOVE_GROUND_METERS = 30;
+
 // 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
 // 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
 const GESTURE_SENSITIVITY_MULTIPLIERS = { image: 2.5, gif: 2.5 };
@@ -361,12 +373,21 @@ export function ArNewView() {
   const handleVertical = useCallback(
     (deltaY) => {
       // 画面上で指を上に動かす(deltaYが負)ほど、3Dデータを上に持ち上げる
-      const verticalDelta =
+      const rawVerticalDelta =
         -deltaY * VERTICAL_METERS_PER_PIXEL * getGestureSensitivityMultiplier(dataFormat);
+      const verticalDelta = clamp(
+        rawVerticalDelta,
+        -MAX_VERTICAL_DELTA_PER_EVENT_METERS,
+        MAX_VERTICAL_DELTA_PER_EVENT_METERS,
+      );
       setGestureDirection(verticalDelta >= 0 ? 1 : -1);
       setAdjustment((prev) => {
         const nextY = prev.y + verticalDelta;
-        return { ...prev, y: groundLocalY === null ? nextY : Math.max(nextY, groundLocalY) };
+        if (groundLocalY === null) return { ...prev, y: nextY };
+        return {
+          ...prev,
+          y: clamp(nextY, groundLocalY, groundLocalY + MAX_HEIGHT_ABOVE_GROUND_METERS),
+        };
       });
     },
     [dataFormat, groundLocalY],
