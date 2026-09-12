@@ -1,7 +1,7 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
-import { Suspense } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Suspense, useRef } from "react";
 import { AnimatedGifPlaneObject } from "../_shared/components/AnimatedGifPlaneObject";
 import { ImagePlaneObject } from "../_shared/components/ImagePlaneObject";
 import { OrientedCamera } from "../_shared/components/OrientedCamera";
@@ -53,6 +53,38 @@ export function DetailedPlacement({ placement, url, motionAssetUrl }) {
   );
 }
 
+// 自己位置の更新間隔(最大1秒, useGeolocationのWATCH_POLL_INTERVAL_MS)の間、
+// AR配置側の描画位置が完全に静止してしまい、歩いている間「画面に張り付いて
+// 追従している」ように見える問題への対策。毎フレーム、現在の描画位置から
+// 最新の目標位置(localX/Y/Z)へ滑らかに近づける（指数的減衰、フレームレート非依存）。
+// 値が大きいほど早く追いつくが大きすぎると結局ガクッと動いて見える。
+const POSITION_LERP_RATE_PER_SECOND = 3;
+
+/** 目標位置(target)へ毎フレーム滑らかに近づく<group>。新規表示時はワープ演出を避けるため即座に目標位置へ合わせる。 */
+function SmoothedPositionGroup({ target, children }) {
+  const groupRef = useRef(null);
+  const isInitializedRef = useRef(false);
+
+  useFrame((_, delta) => {
+    const group = groupRef.current;
+    if (!group) return;
+    const [tx, ty, tz] = target;
+
+    if (!isInitializedRef.current) {
+      group.position.set(tx, ty, tz);
+      isInitializedRef.current = true;
+      return;
+    }
+
+    const t = 1 - Math.exp(-POSITION_LERP_RATE_PER_SECOND * delta);
+    group.position.x += (tx - group.position.x) * t;
+    group.position.y += (ty - group.position.y) * t;
+    group.position.z += (tz - group.position.z) * t;
+  });
+
+  return <group ref={groupRef}>{children}</group>;
+}
+
 /**
  * 現在地周辺の複数のAR配置を同時に表示するシーン。
  * tierが'detail'のものは実データを、'simple'のものはラベルのみを表示する
@@ -78,7 +110,10 @@ export function ArViewScene({ orientation, placements, getPublicUrl }) {
       {hasSplat && <SparkSetup />}
 
       {placements.map((placement) => (
-        <group key={placement.id} position={[placement.localX, placement.localY, placement.localZ]}>
+        <SmoothedPositionGroup
+          key={placement.id}
+          target={[placement.localX, placement.localY, placement.localZ]}
+        >
           {placement.tier === "detail" ? (
             <Suspense fallback={null}>
               <DetailedPlacement
@@ -94,7 +129,7 @@ export function ArViewScene({ orientation, placements, getPublicUrl }) {
           ) : (
             <PlacementLabelSprite label={placement.label} distanceMeters={placement.distance_meters} />
           )}
-        </group>
+        </SmoothedPositionGroup>
       ))}
     </Canvas>
   );
