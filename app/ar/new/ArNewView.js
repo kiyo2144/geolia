@@ -79,6 +79,12 @@ const MAX_HEIGHT_ABOVE_GROUND_METERS = 30;
 // 基準にすると、実際にはあり得ない高さに地面下限が来てしまう。
 const ASSUMED_HAND_HEIGHT_METERS = 1;
 
+// GPS高度と標高タイルの差(rawGroundLocalY)がこれを超えたら、GPS高度が
+// 信用できないとみなす閾値(メートル)。実機確認では屋外で1m未満〜屋内で数十m
+// (最大約50m)のズレが見られており、通常の設置(地上付近)では起こりにくい
+// 大きさとして間を取った値にしている。
+const ALTITUDE_MISMATCH_THRESHOLD_METERS = 15;
+
 // 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
 // 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
 const GESTURE_SENSITIVITY_MULTIPLIERS = { image: 2.5, gif: 2.5 };
@@ -375,10 +381,23 @@ export function ArNewView() {
     [placement],
   );
 
-  // マージンが上限(GROUND_WARNING_MARGIN_MAX_METERS)まで振り切れているときは、
-  // 「多少ブレている」ではなく「GPS高度そのものが信用できない」状態とみなす
+  // GPS高度と標高タイルの実際の差(GPS高度をそのまま信じた場合の地面ローカルY)。
+  // 実機確認の結果、GPSが自己申告する精度(accuracy)・高度のブレ(altitudeJitter)は
+  // 良好な値を返しているのに、実際の高度が標高タイルと40m以上ズレるケースがあった。
+  // つまり自己申告の精度からは高度の信頼性を判断できないため、実際のズレの大きさ
+  // そのものを見て判定する。
+  const rawGroundLocalY = useMemo(() => {
+    if (groundElevation === null || !placement || placement.altitude === null || placement.altitude === undefined) {
+      return null;
+    }
+    return groundElevation - placement.altitude;
+  }, [groundElevation, placement]);
+
+  // 通常、設置場所(地上付近)でのGPS高度と標高タイルの差はここまで大きくならない。
+  // これを超える場合は「GPS高度そのものが信用できない」状態とみなす
   // （屋内などでGPS高度が数十m単位で狂うケースがこれに該当する）。
-  const isAltitudeUnreliable = groundWarningMargin >= GROUND_WARNING_MARGIN_MAX_METERS;
+  const isAltitudeUnreliable =
+    rawGroundLocalY !== null && Math.abs(rawGroundLocalY) > ALTITUDE_MISMATCH_THRESHOLD_METERS;
 
   // 設置面の計算に使う高度。GPS高度が信用できない場合は、実際のGPS高度ではなく
   // 「標高タイルの地面 + 人がスマホを構える高さの目安」を代わりに使う。
@@ -763,8 +782,8 @@ export function ArNewView() {
                       <p className={styles.adjustHint}>
                         生の高度 約{placement.altitude?.toFixed(2) ?? "?"}m　GPS精度 約
                         {placement.accuracy?.toFixed(1) ?? "?"}m　高度のブレ 約
-                        {placement.altitudeJitter?.toFixed(2) ?? "?"}m　警告マージン 約
-                        {groundWarningMargin.toFixed(2)}m　信頼性低判定:{" "}
+                        {placement.altitudeJitter?.toFixed(2) ?? "?"}m　標高との差 約
+                        {rawGroundLocalY === null ? "?" : rawGroundLocalY.toFixed(2)}m　信頼性低判定:{" "}
                         {isAltitudeUnreliable ? "YES" : "no"}
                       </p>
                     )}
