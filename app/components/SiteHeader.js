@@ -2,11 +2,12 @@ import Link from "next/link";
 import styles from "./SiteHeader.module.css";
 
 const NAV_LINKS = [
-  { href: "/map", label: "マップ" },
+  { href: "/", label: "マップ" },
   { href: "/placements", label: "配置一覧" },
   { href: "/datasets", label: "データセット" },
   { href: "/ar/new", label: "AR設置" },
   { href: "/ar/view", label: "AR閲覧" },
+  { href: "/about", label: "About" },
 ];
 
 export function SiteHeader() {

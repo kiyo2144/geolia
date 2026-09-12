@@ -1,9 +1,7 @@
-import MapViewLoader from "./MapViewLoader";
+import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "3Dマップ | geolia",
-};
-
+// 3Dマップはトップページ（/）に統合したため、/map への直接アクセス・
+// 既存のブックマーク/リンクはトップページへ転送する。
 export default function MapPage() {
-  return <MapViewLoader />;
+  redirect("/");
 }
