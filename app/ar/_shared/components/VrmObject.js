@@ -13,6 +13,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // ボーンの角度はnormalized boneのrest pose（T字姿勢）を基準にした相対値（ラジアン）。
 
 const ARM_DOWN_Z = 1.2; // T-pose(水平に伸ばした腕)から自然に下ろすための回転量
+// normalized boneでのZ軸回転は、leftUpperArmが負・rightUpperArmが正の向きで
+// 腕が下がる（実機確認: 符号を逆にすると腕がT-poseから上がってしまう）。
 
 function setBoneRotation(vrm, name, x = 0, y = 0, z = 0) {
   const bone = vrm.humanoid?.getNormalizedBoneNode(name);
@@ -21,8 +23,8 @@ function setBoneRotation(vrm, name, x = 0, y = 0, z = 0) {
 }
 
 function applyIdleMotion(vrm, t) {
-  setBoneRotation(vrm, "leftUpperArm", 0, 0, ARM_DOWN_Z + Math.sin(t * 1.4) * 0.02);
-  setBoneRotation(vrm, "rightUpperArm", 0, 0, -(ARM_DOWN_Z + Math.sin(t * 1.4) * 0.02));
+  setBoneRotation(vrm, "leftUpperArm", 0, 0, -(ARM_DOWN_Z + Math.sin(t * 1.4) * 0.02));
+  setBoneRotation(vrm, "rightUpperArm", 0, 0, ARM_DOWN_Z + Math.sin(t * 1.4) * 0.02);
   setBoneRotation(vrm, "spine", Math.sin(t * 1.4) * 0.02);
   setBoneRotation(vrm, "head", 0, Math.sin(t * 0.6) * 0.05);
   const hips = vrm.humanoid?.getNormalizedBoneNode("hips");
@@ -30,7 +32,7 @@ function applyIdleMotion(vrm, t) {
 }
 
 function applyWaveMotion(vrm, t) {
-  setBoneRotation(vrm, "leftUpperArm", 0, 0, ARM_DOWN_Z);
+  setBoneRotation(vrm, "leftUpperArm", 0, 0, -ARM_DOWN_Z);
   setBoneRotation(vrm, "rightUpperArm", 0.2, 0, -0.3);
   setBoneRotation(vrm, "rightLowerArm", 0, -1.6, 0);
   setBoneRotation(vrm, "rightHand", 0, 0, Math.sin(t * 6) * 0.5);
@@ -38,8 +40,8 @@ function applyWaveMotion(vrm, t) {
 }
 
 function applyBowMotion(vrm, t) {
-  setBoneRotation(vrm, "leftUpperArm", 0, 0, ARM_DOWN_Z);
-  setBoneRotation(vrm, "rightUpperArm", 0, 0, -ARM_DOWN_Z);
+  setBoneRotation(vrm, "leftUpperArm", 0, 0, -ARM_DOWN_Z);
+  setBoneRotation(vrm, "rightUpperArm", 0, 0, ARM_DOWN_Z);
   // 0→1→0を約2.5秒周期で繰り返す（前傾してから戻る）
   const cycle = (Math.sin((t * Math.PI * 2) / 2.5 - Math.PI / 2) + 1) / 2;
   const bowAngle = cycle * 0.6;
@@ -54,8 +56,8 @@ function applyJumpMotion(vrm, t) {
   const squat = Math.max(0, -Math.sin(cyclePos * Math.PI * 2)) * 0.3;
   const legBend = squat + (1 - jumpHeight) * 0.05;
 
-  setBoneRotation(vrm, "leftUpperArm", 0, 0, ARM_DOWN_Z - jumpHeight * 0.8);
-  setBoneRotation(vrm, "rightUpperArm", 0, 0, -(ARM_DOWN_Z - jumpHeight * 0.8));
+  setBoneRotation(vrm, "leftUpperArm", 0, 0, -(ARM_DOWN_Z - jumpHeight * 0.8));
+  setBoneRotation(vrm, "rightUpperArm", 0, 0, ARM_DOWN_Z - jumpHeight * 0.8);
   setBoneRotation(vrm, "leftUpperLeg", legBend);
   setBoneRotation(vrm, "rightUpperLeg", legBend);
   setBoneRotation(vrm, "leftLowerLeg", -legBend * 1.6);
