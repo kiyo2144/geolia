@@ -23,8 +23,31 @@ const EARTH_RADIUS_METERS = 6378137;
 const FETCH_RETRY_COUNT = 2;
 const FETCH_RETRY_DELAY_MS = 1500;
 
+// 道路の形状は交通量の値と違ってほぼ変化しないため、一度取得した範囲はしばらく
+// キャッシュして使い回す（地図を行き来するたびにOverpass APIへ再リクエストするのを防ぐ）。
+// bboxをこの単位（度）の格子に外側スナップしてからキャッシュキーにすることで、
+// 少しのパン操作なら同じキャッシュがそのまま使える。
+const GEOMETRY_CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_GRID_DEGREES = 0.05;
+const geometryCache = new Map(); // key -> { ways: Promise, expiresAt: number }
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// bboxを含む最小の格子（CACHE_GRID_DEGREES四方）に外側スナップする
+function snapBboxToGrid(bbox) {
+  const grid = CACHE_GRID_DEGREES;
+  return {
+    minLng: Math.floor(bbox.minLng / grid) * grid,
+    minLat: Math.floor(bbox.minLat / grid) * grid,
+    maxLng: Math.ceil(bbox.maxLng / grid) * grid,
+    maxLat: Math.ceil(bbox.maxLat / grid) * grid,
+  };
+}
+
+function bboxCacheKey(bbox) {
+  return `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`;
 }
 
 function toRadians(degrees) {
@@ -43,14 +66,7 @@ function toLocalMeters(origin, point) {
   };
 }
 
-/**
- * 指定範囲内の主要道路（線形状）をOverpass APIから取得する。
- * bbox: { minLng, minLat, maxLng, maxLat }
- * 戻り値: [{ id, nodeIds, tags, coordinates: [[lng,lat], ...] }, ...]
- * nodeIds（OSMのノードID列）は、隣接するway同士のつながりを判定するために使う
- * （区間の延長処理・buildHighlightedSegment参照）。
- */
-export async function fetchNearbyRoadWays(bbox) {
+async function fetchRoadWaysFromOverpass(bbox) {
   const query = `[out:json][timeout:20];way[highway~"^(${HIGHWAY_TYPES})$"](${bbox.minLat},${bbox.minLng},${bbox.maxLat},${bbox.maxLng});out geom;`;
 
   let lastError;
@@ -76,6 +92,34 @@ export async function fetchNearbyRoadWays(bbox) {
     }
   }
   throw lastError;
+}
+
+/**
+ * 指定範囲内の主要道路（線形状）をOverpass APIから取得する。
+ * bbox: { minLng, minLat, maxLng, maxLat }
+ * 戻り値: [{ id, nodeIds, tags, coordinates: [[lng,lat], ...] }, ...]
+ * nodeIds（OSMのノードID列）は、隣接するway同士のつながりを判定するために使う
+ * （区間の延長処理・buildHighlightedSegment参照）。
+ *
+ * bboxはCACHE_GRID_DEGREES単位の格子に外側スナップしてから取得・キャッシュするため、
+ * 少しのパン操作であれば同じキャッシュ（GEOMETRY_CACHE_TTL_MSの間）が再利用される。
+ */
+export async function fetchNearbyRoadWays(bbox) {
+  const snapped = snapBboxToGrid(bbox);
+  const key = bboxCacheKey(snapped);
+  const cached = geometryCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.ways;
+  }
+
+  const waysPromise = fetchRoadWaysFromOverpass(snapped);
+  geometryCache.set(key, { ways: waysPromise, expiresAt: Date.now() + GEOMETRY_CACHE_TTL_MS });
+  try {
+    return await waysPromise;
+  } catch (error) {
+    geometryCache.delete(key); // 失敗した結果をキャッシュに残さない（次回また取得を試みられるように）
+    throw error;
+  }
 }
 
 // 点pointから線分(a-b)までの最短距離（メートル）を求める（origin基準のローカル平面近似）

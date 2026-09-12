@@ -59,6 +59,13 @@ const BASEMAP_TILES = {
 const DEM_TILE_URL = "/api/dem-tile/{z}/{x}/{y}.png";
 
 const MIN_ZOOM_FOR_DATA = 13;
+// JARTIC交通量レイヤーは、表示範囲が広いとOverpass APIへの道路取得・観測点との
+// 照合処理が重くなるため、ある程度ズームインした状態でのみ取得・表示する
+// （パン可能範囲の制限を解除した際の負荷対策）。
+const MIN_ZOOM_FOR_TRAFFIC = 12;
+// 地形（標高タイル）表現を有効化する最低ズームレベル。applyTerrain参照。
+// サイドバーの案内文（「標高データはズームレベル12以上でのみ表示されます」）と合わせる。
+const MIN_ZOOM_FOR_TERRAIN = 12;
 
 // 起動時、現在地が取得できればその地点を中心にズームレベルこの値・上面（真上から
 // 見下ろす）表示にする。取得できない場合は町全体を見渡せる俯瞰表示にフォールバックする。
@@ -297,8 +304,15 @@ function addDataLayers(map, landColorMode) {
 // 標高タイルによる地形起伏（試験的機能）の有効/無効・強調倍率を切り替える。
 // スタイル読み込み未完了時はエラーになるため、呼び出し側でtry/catchするか、
 // スタイル読み込み確認後（isStyleLoaded()）に呼び出すこと。
+//
+// enabledがtrueでも、地図のズームレベルがMIN_ZOOM_FOR_TERRAINを下回る場合は
+// 強制的に地形を無効化する。MapLibreの地形機能はソースのminzoom/maxzoomに
+// 関わらず、画面に映っている地理的範囲全体のDEMタイルを読み込もうとするため、
+// パン範囲の制限を解除した状態で日本全体のような広い範囲を表示すると、
+// 数万件規模のタイルリクエストが発生しブラウザが応答不能になることを実機で確認した。
 function applyTerrain(map, enabled, exaggeration) {
-  if (enabled) {
+  const effectiveEnabled = enabled && map.getZoom() >= MIN_ZOOM_FOR_TERRAIN;
+  if (effectiveEnabled) {
     if (!map.getSource("terrain-dem")) {
       map.addSource("terrain-dem", {
         type: "raster-dem",
@@ -493,6 +507,7 @@ export default function MapView() {
   const [landVisible, setLandVisible] = useState(false);
   const [buildingsVisible, setBuildingsVisible] = useState(true);
   const [trafficVisible, setTrafficVisible] = useState(false);
+  const [trafficStatus, setTrafficStatus] = useState("");
   const [landColorMode, setLandColorMode] = useState("koaza");
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [terrainExaggeration, setTerrainExaggeration] = useState(1.5);
@@ -701,8 +716,17 @@ export default function MapView() {
     if (!latestFlagsRef.current.trafficVisible) {
       map.getSource("traffic-points").setData(EMPTY_FEATURE_COLLECTION);
       map.getSource("traffic-road-highlight")?.setData(EMPTY_FEATURE_COLLECTION);
+      setTrafficStatus("");
       return;
     }
+
+    if (map.getZoom() < MIN_ZOOM_FOR_TRAFFIC) {
+      map.getSource("traffic-points").setData(EMPTY_FEATURE_COLLECTION);
+      map.getSource("traffic-road-highlight")?.setData(EMPTY_FEATURE_COLLECTION);
+      setTrafficStatus("ズームレベルを上げると交通量が表示されます");
+      return;
+    }
+    setTrafficStatus("");
 
     const bounds = map.getBounds();
     const bbox = {
@@ -1118,6 +1142,16 @@ export default function MapView() {
         refreshTraffic();
         refreshElevationSampler();
       }, 300);
+    });
+
+    // ズームレベルをまたぐたびに、地形の有効/無効を即座に再評価する（debounceを待たず、
+    // ズームアウト中にDEMタイルの大量リクエストが発生し始めるのを素早く止めるため）。
+    map.on("zoom", () => {
+      try {
+        applyTerrain(map, terrainEnabledRef.current, terrainExaggerationRef.current);
+      } catch {
+        // スタイル未読み込み等は無視（tryInitLayers側の初期適用で最終的に反映される）
+      }
     });
 
     const popup = new Popup({ closeButton: true, closeOnClick: true });
@@ -1618,6 +1652,7 @@ export default function MapView() {
               異なる場合があります。
             </p>
           )}
+          {trafficVisible && trafficStatus && <p className={styles.status}>{trafficStatus}</p>}
         </section>
 
         <section className={styles.section}>
