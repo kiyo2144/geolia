@@ -79,11 +79,16 @@ const MAX_HEIGHT_ABOVE_GROUND_METERS = 30;
 // 基準にすると、実際にはあり得ない高さに地面下限が来てしまう。
 const ASSUMED_HAND_HEIGHT_METERS = 1;
 
-// GPS高度と標高タイルの差(rawGroundLocalY)がこれを超えたら、GPS高度が
-// 信用できないとみなす閾値(メートル)。実機確認では屋外で1m未満〜屋内で数十m
-// (最大約50m)のズレが見られており、通常の設置(地上付近)では起こりにくい
-// 大きさとして間を取った値にしている。
-const ALTITUDE_MISMATCH_THRESHOLD_METERS = 15;
+// GPS高度が標高タイルより「上」にズレている場合の閾値(メートル)。実機確認では
+// 屋外で1m未満〜屋内で数十m(最大約50m)のズレが見られており、通常の設置(地上付近)
+// では起こりにくい大きさとして間を取った値にしている。上方向は高い建物の上層階など
+// 正当なケースもあり得るため、下方向より緩めにしている。
+const ALTITUDE_ABOVE_TERRAIN_MISMATCH_THRESHOLD_METERS = 15;
+
+// GPS高度が標高タイルより「下」にズレている場合の閾値(メートル)。屋外の地表で
+// GPS高度が標高タイルより数m以上低く出ることは通常あり得ない(地面に埋まっている
+// ことになってしまう)ため、上方向より小さい値で信頼できないと判定する。
+const ALTITUDE_BELOW_TERRAIN_MISMATCH_THRESHOLD_METERS = 3;
 
 // 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
 // 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
@@ -396,8 +401,12 @@ export function ArNewView() {
   // 通常、設置場所(地上付近)でのGPS高度と標高タイルの差はここまで大きくならない。
   // これを超える場合は「GPS高度そのものが信用できない」状態とみなす
   // （屋内などでGPS高度が数十m単位で狂うケースがこれに該当する）。
+  // rawGroundLocalYが正＝GPS高度が標高タイルより下、負＝上。下方向は地表にいる限り
+  // ほぼあり得ないため閾値を小さく、上方向は高層階等もあり得るため閾値を大きくしている。
   const isAltitudeUnreliable =
-    rawGroundLocalY !== null && Math.abs(rawGroundLocalY) > ALTITUDE_MISMATCH_THRESHOLD_METERS;
+    rawGroundLocalY !== null &&
+    (rawGroundLocalY > ALTITUDE_BELOW_TERRAIN_MISMATCH_THRESHOLD_METERS ||
+      rawGroundLocalY < -ALTITUDE_ABOVE_TERRAIN_MISMATCH_THRESHOLD_METERS);
 
   // 設置面の計算に使う高度。GPS高度が信用できない場合は、実際のGPS高度ではなく
   // 「標高タイルの地面 + 人がスマホを構える高さの目安」を代わりに使う。
