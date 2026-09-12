@@ -800,6 +800,19 @@ export default function MapView() {
   const refreshElevationSampler = useCallback(async () => {
     const map = mapRef.current;
     if (!map) return;
+
+    // 標高タイルは固定ズーム(DEM_TILE_ZOOM)で取得するため、表示範囲が広いほど
+    // 必要なタイル枚数が際限なく増える。パン可能範囲の制限を解除した状態で広域を
+    // 表示すると、数百枚規模のタイル取得が発生してフリーズする不具合を実機で確認した
+    // （地形表現(applyTerrain)と同じ問題がこちらにも別途あった）。地形と同じしきい値で
+    // ガードする。
+    if (map.getZoom() < MIN_ZOOM_FOR_TERRAIN) {
+      elevationSamplerRef.current = () => 0; // 呼び出し側は常に関数として呼ぶため、nullではなくno-opに戻す
+      updateLocationMarkerRef.current();
+      updateArPlacementMarkersRef.current();
+      return;
+    }
+
     const bounds = map.getBounds();
     const bbox = {
       minLng: bounds.getWest(),
