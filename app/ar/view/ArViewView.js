@@ -24,7 +24,7 @@ import styles from "./ArViewView.module.css";
 
 // 位置追従・GPS高度の原因切り分け用に追加したデバッグ表示の一時的な表示切り替え。
 // 調査が必要になったらtrueに戻す。
-const SHOW_DEBUG_INFO = false;
+const SHOW_DEBUG_INFO = true;
 
 // 要件定義 docs/requirements.md 4.2.1章の初期値
 const FETCH_RADIUS_METERS = 300; // 段階1: 取得半径
