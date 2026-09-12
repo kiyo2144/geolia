@@ -383,11 +383,20 @@ export function ArNewView() {
       setGestureDirection(verticalDelta >= 0 ? 1 : -1);
       setAdjustment((prev) => {
         const nextY = prev.y + verticalDelta;
-        if (groundLocalY === null) return { ...prev, y: nextY };
-        return {
-          ...prev,
-          y: clamp(nextY, groundLocalY, groundLocalY + MAX_HEIGHT_ABOVE_GROUND_METERS),
-        };
+        const desiredY =
+          groundLocalY === null
+            ? nextY
+            : clamp(nextY, groundLocalY, groundLocalY + MAX_HEIGHT_ABOVE_GROUND_METERS);
+        // 地面の高さ(groundLocalY)はGPSの高度と標高タイルの差から計算しているため、
+        // GPSの高度が不正確だと大きくずれることがある。そのタイミングでdesiredYが
+        // 現在地から大きく離れていても、地面クランプでその場に一瞬で飛ばすのではなく、
+        // 他の高さ変化と同様に1回のイベントで動ける量までしか動かさない。
+        const step = clamp(
+          desiredY - prev.y,
+          -MAX_VERTICAL_DELTA_PER_EVENT_METERS,
+          MAX_VERTICAL_DELTA_PER_EVENT_METERS,
+        );
+        return { ...prev, y: prev.y + step };
       });
     },
     [dataFormat, groundLocalY],
@@ -726,7 +735,8 @@ export function ArNewView() {
                         緯度 {placement.lat.toFixed(6)}　経度 {placement.lng.toFixed(6)}
                         　高度{" "}
                         {finalAltitude === null ? "取得できませんでした" : `約${finalAltitude.toFixed(2)}m`}
-                        {groundLocalY !== null && `（地面比 約${adjustment.y.toFixed(2)}m）`}
+                        {groundLocalY !== null &&
+                          `（地面からの高さ 約${(adjustment.y - groundLocalY).toFixed(2)}m）`}
                       </p>
                     )}
 
