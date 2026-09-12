@@ -94,6 +94,15 @@ export function useGeolocation({ watch = true, emaAlpha = DEFAULT_POSITION_EMA_A
         sameAsPreviousRawCount: prev.sameAsPreviousRawCount + (isSameAsPreviousRaw ? 1 : 0),
       }));
 
+      // iOS等ではmaximumAge:0を指定していても、GPSが新しいfixを取得できていない間
+      // 直前と全く同じ座標のfixを返し続けることがある(実機確認)。これをそのまま
+      // 「新しい確定情報」として扱うと、smoothedRef.current.timestampだけが
+      // 実際の移動を伴わずに更新され続け、後で本当に移動した際の外れ値検知
+      // （前回の確定時刻からの経過時間で速度を見積もる）が実態より短い経過時間で
+      // 計算されてしまい、本来の移動が「速すぎる」と誤って棄却される原因になる。
+      // そのため、直前と完全に同じ座標のfixは何もせず読み捨てる。
+      if (isSameAsPreviousRaw) return;
+
       // 1. 精度ゲート
       if (accuracy > MAX_ACCURACY_METERS) {
         setDebugInfo((prev) => ({
