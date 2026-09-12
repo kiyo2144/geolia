@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase/client";
 import { FirstPersonView } from "./FirstPersonView";
 import { createElevationSampler } from "./mapMeshBuilders";
+import { ArPlacementPopupContent } from "./ArPlacementPopupContent";
 import styles from "./MapView.module.css";
 
 // v6は最新すぎてバンドラー環境でのWorker解決やfill-extrusion描画に問題があったため、
@@ -510,6 +512,15 @@ export default function MapView() {
   const arPlacementMarkersRef = useRef(new Map());
   const updateArPlacementMarkersRef = useRef(() => {});
   const arPlacementPopupRef = useRef(null);
+  // AR配置ポップアップの中身はMapLibreの生HTMLではなくReactコンポーネント
+  // （ArPlacementPopupContent、3Dプレビュー・削除ボタンを含む）で描画するため、
+  // setDOMContentで使う入れ物のdivをstateの遅延初期化で一度だけ作って保持し、
+  // 選択中の配置をReact側のポータルで描画する（マウント時に一度作るだけなので、
+  // 副作用として扱う必要はない＝Effect内でのsetState呼び出しを避けられる）。
+  const [arPlacementPopupContainer] = useState(() =>
+    typeof document === "undefined" ? null : document.createElement("div"),
+  );
+  const [selectedArPlacement, setSelectedArPlacement] = useState(null);
   // 高度接続線の地表面側の点をクリックしたときに、その地点の標高タイルの高度を表示する
   const terrainElevationPopupRef = useRef(null);
 
@@ -738,23 +749,10 @@ export default function MapView() {
         event.stopPropagation();
         const marker = arPlacementMarkersRef.current.get(id);
         if (!marker) return;
-        const p = marker.properties;
-        const altitudeText =
-          p.altitude === null || p.altitude === undefined
-            ? "高度情報なし"
-            : `高度 約${Math.round(p.altitude)}m`;
-        const assetTypeLabel =
-          p.asset_type === "gaussian_splat" ? "Gaussian Splat" : "点群";
-        const previewHtml = p.preview_storage_path
-          ? `<img src="${
-              supabase.storage.from("ar-assets").getPublicUrl(p.preview_storage_path)
-                .data.publicUrl
-            }" alt="設置プレビュー" style="width:100%;max-width:220px;border-radius:6px;margin-bottom:6px;display:block;" />`
-          : "";
         // プライバシー保護のため、緯度・経度は表示しない（ユーザー登録・公開設定の
         // 導入までの暫定対応。将来的にユーザーが公開/非公開を選択できるようにする）。
-        const html = `${previewHtml}<b>${p.label ?? "AR配置"}</b><br>種別 ${assetTypeLabel}（${p.format}）<br>${altitudeText}`;
-        arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).setHTML(html).addTo(map);
+        setSelectedArPlacement(marker.properties);
+        arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).addTo(map);
       });
 
       const groundLine = createGroundLineElements(groundLinesSvgRef.current, AR_PLACEMENT_MARKER_COLOR);
@@ -775,6 +773,13 @@ export default function MapView() {
 
     updateArPlacementMarkersRef.current();
   }, [supabase, showTerrainElevationPopup]);
+
+  // ポップアップの削除ボタンから、削除成功後に呼ばれる。ポップアップを閉じつつ、
+  // 表示中のピンをDBの最新状態に合わせて更新する。
+  const handleArPlacementDeleted = useCallback(() => {
+    arPlacementPopupRef.current?.remove();
+    refreshArPlacements();
+  }, [refreshArPlacements]);
 
   // 取得した位置情報（GeolocationCoordinates）をマーカー・ステータス表示に反映する。
   // 常時追跡（watchPosition）と「現在地へ移動」ボタン（getCurrentPosition）の
@@ -1096,7 +1101,11 @@ export default function MapView() {
     // クリーンアップ時にrefの最新値ではなくマウント時点のMapを確実に片付けられるよう、
     // ローカル変数として捕捉しておく。
     const arPlacementMarkers = arPlacementMarkersRef.current;
-    arPlacementPopupRef.current = new Popup({ closeButton: true, closeOnClick: true });
+    const arPlacementPopup = new Popup({ closeButton: true, closeOnClick: true }).setDOMContent(
+      arPlacementPopupContainer,
+    );
+    arPlacementPopup.on("close", () => setSelectedArPlacement(null));
+    arPlacementPopupRef.current = arPlacementPopup;
     const updateArPlacementMarkers = () => {
       for (const marker of arPlacementMarkers.values()) {
         const hasAltitude = marker.altitude !== null && marker.altitude !== undefined;
@@ -1597,6 +1606,35 @@ export default function MapView() {
       </aside>
 
       <div ref={mapContainerRef} className={styles.mapContainer} />
+
+      {selectedArPlacement &&
+        arPlacementPopupContainer &&
+        createPortal(
+          <ArPlacementPopupContent
+            placement={selectedArPlacement}
+            previewUrl={
+              selectedArPlacement.preview_storage_path
+                ? supabase.storage.from("ar-assets").getPublicUrl(selectedArPlacement.preview_storage_path)
+                    .data.publicUrl
+                : null
+            }
+            dataUrl={
+              selectedArPlacement.storage_path
+                ? supabase.storage.from("ar-assets").getPublicUrl(selectedArPlacement.storage_path).data
+                    .publicUrl
+                : null
+            }
+            motionAssetUrl={
+              selectedArPlacement.motion_storage_path
+                ? supabase.storage.from("ar-motion-assets").getPublicUrl(
+                    selectedArPlacement.motion_storage_path,
+                  ).data.publicUrl
+                : null
+            }
+            onDeleted={handleArPlacementDeleted}
+          />,
+          arPlacementPopupContainer,
+        )}
 
       <button
         type="button"

@@ -1,0 +1,14 @@
+.canvasArea {
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  margin-bottom: 6px;
+}
+
+.canvasArea:active {
+  cursor: grabbing;
+}

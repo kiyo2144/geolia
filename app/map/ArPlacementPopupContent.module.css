@@ -1,0 +1,63 @@
+.wrapper {
+  min-width: 180px;
+}
+
+.previewImage {
+  width: 100%;
+  max-width: 220px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.deleteButton {
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #f85149;
+  background: #fff;
+  color: #f85149;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancelButton {
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+  background: #fff;
+  color: #333;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.deleteConfirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.passwordInput {
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+  font-size: 0.8rem;
+}
+
+.error {
+  font-size: 0.75rem;
+  color: #f85149;
+  margin: 0;
+}

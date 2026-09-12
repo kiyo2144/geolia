@@ -21,7 +21,7 @@ const ROTATE_PIXELS_TO_RADIANS = 0.012;
  * 自動調整する（アングル自体はVIEW_DIRECTIONで固定のまま）。調整後はロックし、
  * ユーザーが回転させてもカメラが動き続けないようにする。
  */
-function AutoFitCamera({ targetRef }) {
+export function AutoFitCamera({ targetRef }) {
   const { camera } = useThree();
   const fittedRef = useRef(false);
 
