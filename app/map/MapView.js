@@ -639,6 +639,12 @@ export default function MapView() {
     terrainEnabledRef.current = terrainEnabled;
   }, [terrainEnabled]);
 
+  // 直近にapplyTerrainへ反映した「ズーム条件（MIN_ZOOM_FOR_TERRAIN）を満たしているか」。
+  // 'zoom'イベントはジェスチャー中に非常に高頻度で発火するため、この状態が実際に
+  // 変化した（しきい値をまたいだ）時だけapplyTerrainを呼ぶことで、ズーム中に
+  // 毎フレームsetTerrainし直して重くなるのを防ぐ。
+  const terrainZoomGateEnabledRef = useRef(true);
+
   const terrainExaggerationRef = useRef(terrainExaggeration);
   useEffect(() => {
     terrainExaggerationRef.current = terrainExaggeration;
@@ -1144,9 +1150,15 @@ export default function MapView() {
       }, 300);
     });
 
-    // ズームレベルをまたぐたびに、地形の有効/無効を即座に再評価する（debounceを待たず、
-    // ズームアウト中にDEMタイルの大量リクエストが発生し始めるのを素早く止めるため）。
+    // ズームがMIN_ZOOM_FOR_TERRAINをまたいだ瞬間だけ、地形の有効/無効を再評価する
+    // （debounceを待たず、ズームアウト中にDEMタイルの大量リクエストが発生し始めるのを
+    // 素早く止めるため）。'zoom'イベント自体はジェスチャー中に毎フレーム発火するため、
+    // 条件をまたいでいない限りapplyTerrainを呼ばないようにし、ズーム操作そのものが
+    // 重くなるのを防ぐ。
     map.on("zoom", () => {
+      const zoomGateEnabled = map.getZoom() >= MIN_ZOOM_FOR_TERRAIN;
+      if (zoomGateEnabled === terrainZoomGateEnabledRef.current) return;
+      terrainZoomGateEnabledRef.current = zoomGateEnabled;
       try {
         applyTerrain(map, terrainEnabledRef.current, terrainExaggerationRef.current);
       } catch {
