@@ -55,8 +55,9 @@ function computeGroundWarningMargin(accuracy, altitudeJitter) {
 // x/z(水平位置)は「狙い撃ち配置」で決まるため、微調整では上下移動・回転・拡大縮小のみ扱う
 const DEFAULT_ADJUSTMENT = { y: 0, rotationX: 0, rotationY: 0, scale: 1 };
 
-// 2本指を上下にスライドした時、1pxあたりどれだけ高さ(メートル)を動かすか
-const VERTICAL_METERS_PER_PIXEL = 0.01;
+// 2本指を上下にスライドした時、1pxあたりどれだけ高さ(メートル)を動かすか。
+// 画面の半分〜全体を一気にスワイプしたときの変化量が1〜2m程度に収まるくらいを目安にしている。
+const VERTICAL_METERS_PER_PIXEL = 0.002;
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 50;
 
