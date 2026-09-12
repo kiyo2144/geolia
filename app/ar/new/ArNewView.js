@@ -373,8 +373,9 @@ export function ArNewView() {
   const handleVertical = useCallback(
     (deltaY) => {
       // 画面上で指を上に動かす(deltaYが負)ほど、3Dデータを上に持ち上げる
-      const rawVerticalDelta =
-        -deltaY * VERTICAL_METERS_PER_PIXEL * getGestureSensitivityMultiplier(dataFormat);
+      // 上下移動は画像・GIFでも位置のずれがそのまま見えるため、回転と違って
+      // データ種別による感度補正(GESTURE_SENSITIVITY_MULTIPLIERS)はかけない。
+      const rawVerticalDelta = -deltaY * VERTICAL_METERS_PER_PIXEL;
       const verticalDelta = clamp(
         rawVerticalDelta,
         -MAX_VERTICAL_DELTA_PER_EVENT_METERS,
@@ -399,7 +400,7 @@ export function ArNewView() {
         return { ...prev, y: prev.y + step };
       });
     },
-    [dataFormat, groundLocalY],
+    [groundLocalY],
   );
 
   const handleResetAdjustment = () => setAdjustment(DEFAULT_ADJUSTMENT);
