@@ -44,8 +44,8 @@ export function makeProjector(bbox) {
 
 // --- 標高データの取得・サンプリング ---
 
-async function fetchDemImageData(z, x, y) {
-  const response = await fetch(`/api/dem-tile/${z}/${x}/${y}.png`);
+async function fetchDemImageData(z, x, y, signal) {
+  const response = await fetch(`/api/dem-tile/${z}/${x}/${y}.png`, { signal });
   if (!response.ok) return null;
   const blob = await response.blob();
   const bitmap = await createImageBitmap(blob);
@@ -64,7 +64,10 @@ function decodeMapboxRgbHeight(r, g, b) {
 
 export const DEM_TILE_ZOOM = 14; // 標高タイルの取得ズーム（GSI標高タイルの提供上限に合わせる）
 
-export async function createElevationSampler(bbox) {
+// signal: AbortSignal（省略可）。ズーム・パンを素早く繰り返した際に、古い（もう画面に
+// 関係ない）範囲のタイル取得・デコードが残り続けて重くなるのを防ぐため、呼び出し側が
+// 新しいリクエストを開始する際に古いsignalをabortできるようにしている。
+export async function createElevationSampler(bbox, signal) {
   const z = DEM_TILE_ZOOM;
   const nw = lngLatToTileFloat(bbox.minLng, bbox.maxLat, z);
   const se = lngLatToTileFloat(bbox.maxLng, bbox.minLat, z);
@@ -78,7 +81,7 @@ export async function createElevationSampler(bbox) {
   for (let tx = minTileX; tx <= maxTileX; tx++) {
     for (let ty = minTileY; ty <= maxTileY; ty++) {
       tasks.push(
-        fetchDemImageData(z, tx, ty).then((imageData) => {
+        fetchDemImageData(z, tx, ty, signal).then((imageData) => {
           if (imageData) tiles.set(`${tx}:${ty}`, imageData);
         }),
       );

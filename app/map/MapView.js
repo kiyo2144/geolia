@@ -536,6 +536,11 @@ export default function MapView() {
   // 標高タイルの実際の値と大きく異なる値を返すことがあり、地図を傾けた際に
   // マーカーの位置が地形とずれて見える不具合の原因になっていたため。
   const elevationSamplerRef = useRef(() => 0);
+  // 直近のcreateElevationSampler呼び出しを中断するためのAbortController。
+  // ズーム・パンを素早く繰り返すと、古い（もう関係ない）範囲のタイル取得・デコードが
+  // 積み重なって重くなる不具合が実機で確認されたため、新しい取得を始める際は
+  // 必ず直前の取得を中断する。
+  const elevationAbortControllerRef = useRef(null);
   // カーソル位置の緯度経度・標高を表示するコントロール（mousemoveで直接更新する）
   const cursorInfoControlRef = useRef(null);
 
@@ -713,11 +718,20 @@ export default function MapView() {
     setStatus("");
   }, [supabase]);
 
+  // ズーム・パンを素早く繰り返すと、古い（もう関係ない）リクエストのOverpass取得・
+  // 照合処理が後から完了して表示を上書きしたり、無駄なリトライが積み重なって重くなる
+  // ことが実機で確認された。呼び出しごとに番号を振り、後から呼ばれた新しいリクエスト
+  // が来ていたら古い方は結果を破棄して即座に打ち切る。
+  const trafficRequestIdRef = useRef(0);
+
   // JARTIC（道路交通情報センター）の交通量データ。外部APIかつ更新頻度が5分単位のため、
   // 森林簿・地籍等とは別の軽量な単一ソース（バッファ切り替えなし）で扱う。
   const refreshTraffic = useCallback(async () => {
     const map = mapRef.current;
     if (!map || !map.getSource("traffic-points")) return;
+
+    const requestId = ++trafficRequestIdRef.current;
+    const isStale = () => trafficRequestIdRef.current !== requestId;
 
     if (!latestFlagsRef.current.trafficVisible) {
       map.getSource("traffic-points").setData(EMPTY_FEATURE_COLLECTION);
@@ -750,6 +764,8 @@ export default function MapView() {
       console.error("交通量データの取得に失敗しました:", error);
     }
 
+    if (isStale()) return; // この間により新しいズーム・パンが発生していれば打ち切る
+
     // 【実験的機能】観測点に対応する道路の区間（つながる同一路線のwayを連結した範囲）を
     // 推定してハイライトする。対応する道路が見つからない観測点や、Overpass APIの
     // 混雑等でハイライト自体が取得できなかった場合は、その観測点だけ丸マーカー
@@ -757,6 +773,7 @@ export default function MapView() {
     if (trafficData?.features?.length) {
       try {
         const ways = await fetchNearbyRoadWays(bbox);
+        if (isStale()) return; // Overpass待ちの間により新しいリクエストが来ていれば結果を捨てる
         const unmatchedFeatures = [];
         const highlightFeatures = trafficData.features
           .map((feature) => {
@@ -806,12 +823,18 @@ export default function MapView() {
     // 表示すると、数百枚規模のタイル取得が発生してフリーズする不具合を実機で確認した
     // （地形表現(applyTerrain)と同じ問題がこちらにも別途あった）。地形と同じしきい値で
     // ガードする。
+    // 新しい取得を始める前に、前回分（もう関係なくなった範囲）のタイル取得を中断する
+    elevationAbortControllerRef.current?.abort();
+
     if (map.getZoom() < MIN_ZOOM_FOR_TERRAIN) {
       elevationSamplerRef.current = () => 0; // 呼び出し側は常に関数として呼ぶため、nullではなくno-opに戻す
       updateLocationMarkerRef.current();
       updateArPlacementMarkersRef.current();
       return;
     }
+
+    const controller = new AbortController();
+    elevationAbortControllerRef.current = controller;
 
     const bounds = map.getBounds();
     const bbox = {
@@ -821,11 +844,13 @@ export default function MapView() {
       maxLat: bounds.getNorth(),
     };
     try {
-      elevationSamplerRef.current = await createElevationSampler(bbox);
+      elevationSamplerRef.current = await createElevationSampler(bbox, controller.signal);
       updateLocationMarkerRef.current();
       updateArPlacementMarkersRef.current();
     } catch (error) {
-      console.error("標高データの取得に失敗しました:", error);
+      if (error?.name !== "AbortError") {
+        console.error("標高データの取得に失敗しました:", error);
+      }
     }
   }, []);
 
