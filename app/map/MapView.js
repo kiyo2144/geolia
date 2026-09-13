@@ -636,9 +636,14 @@ export default function MapView() {
     // offsetはピン先端（アンカー座標）からの距離。ピン自体の見た目の高さ（約34px）より
     // 小さいと、ポップアップの吹き出し先端がピンのアイコン本体と重なって表示が崩れる
     // （ボタン名を「ARシュミレーション」に変更した際に発覚）。
-    const popup = new Popup({ closeButton: false, closeOnClick: false, offset: 40 }).setDOMContent(
-      popupContent,
-    );
+    // maxWidthはデフォルト240pxのままだと、ボタン2つ分の幅（padding込みで240px超）を
+    // 収めきれず、白い背景の右端でキャンセルボタンが途中で切れて見えてしまうため無効化する。
+    const popup = new Popup({
+      closeButton: false,
+      closeOnClick: false,
+      offset: 40,
+      maxWidth: "none",
+    }).setDOMContent(popupContent);
     const marker = new Marker({
       element: createFirstPersonPinElement(FIRST_PERSON_MARKER_COLOR),
       anchor: "bottom",
