@@ -1,20 +1,26 @@
+/* 「森と光」— 3Dマップの標高段彩（緑・ティール・オレンジ）やAR配置ピンの紫と
+   地続きになるよう、UI側も森の緑と陽だまりの色でまとめたデザイン方向性（C案）。 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --text-secondary: #666666;
-  --border-color: #e5e5e5;
-  --accent: #171717;
-  --accent-foreground: #ffffff;
+  --background: #f6f4ec;
+  --foreground: #4a3b2f;
+  --text-secondary: #7c8c72;
+  --border-color: #d9d3bf;
+  --accent: #1f4d3a;
+  --accent-foreground: #f6f4ec;
+  --secondary-bg: #e6e6d6;
+  --font-body: "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif;
+  --font-display: "Kaisei Tokumin", serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --text-secondary: #a1a1a1;
-    --border-color: #2a2a2a;
-    --accent: #ededed;
-    --accent-foreground: #0a0a0a;
+    --background: #14201a;
+    --foreground: #eef1e2;
+    --text-secondary: #9db08f;
+    --border-color: #2a3a2e;
+    --accent: #6cb392;
+    --accent-foreground: #0f2118;
+    --secondary-bg: #223328;
   }
 }
 
@@ -34,9 +40,14 @@ body {
   flex-direction: column;
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
 }
 
 * {

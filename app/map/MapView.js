@@ -197,22 +197,23 @@ const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 // 3D立体物（fill-extrusion）ではなくDOM要素のアイコン（常にカメラ正面を向く）で表示する。
 const LOCATION_MARKER_COLOR = "#e63946";
 
-// AR配置ピンの色。現在地マーカーと区別できるよう別の色にする。
+// AR配置ピンの色。現在地マーカーと区別できるよう別の色にする（配置データの意味を
+// 表す色のため、ブランドカラー（--accent）とは独立した固定色にする）。
 const AR_PLACEMENT_MARKER_COLOR = "#8e44ad";
-
-// 一人称視点の開始地点ピンの色。
-const FIRST_PERSON_MARKER_COLOR = "#2b6cff";
 
 // 一人称視点の開始地点ピン用のシンプルなSVGマーカー要素を作る。
 // createPinMarkerElement()とは違い、maplibregl.Markerに直接渡して位置管理を
 // 任せる（地形の起伏を考慮した独自の投影計算をする現在地・AR配置ピンとは異なり、
 // クリックした地点そのものを示すだけなので、それで十分なため）。
-function createFirstPersonPinElement(color) {
+// 色はJSで固定せず、fill/strokeにCSS変数（globals.cssの--accent/--background）を
+// 直接指定する。これにより、このピン（＝ARシュミレーションボタンと対になるUI操作の
+// 起点）はポップアップのボタン色と常に連動する。
+function createFirstPersonPinElement() {
   const el = document.createElement("div");
   el.innerHTML =
     '<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">' +
-    `<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>` +
-    '<circle cx="14" cy="12" r="4.2" fill="#ffffff"/>' +
+    '<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" style="fill:var(--accent);stroke:var(--background);stroke-width:1.5"/>' +
+    '<circle cx="14" cy="12" r="4.2" style="fill:var(--background)"/>' +
     "</svg>";
   return el;
 }
@@ -645,7 +646,7 @@ export default function MapView() {
       maxWidth: "none",
     }).setDOMContent(popupContent);
     const marker = new Marker({
-      element: createFirstPersonPinElement(FIRST_PERSON_MARKER_COLOR),
+      element: createFirstPersonPinElement(),
       anchor: "bottom",
     })
       .setLngLat([firstPersonPendingOrigin.lng, firstPersonPendingOrigin.lat])

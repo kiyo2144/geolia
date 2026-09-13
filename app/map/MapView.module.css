@@ -38,12 +38,12 @@
 }
 
 .firstPersonPopup button:first-child {
-  background: #1f6feb;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .firstPersonPopup button:last-child {
-  background: #eee;
+  background: var(--secondary-bg);
   color: #1a1a1a;
 }
 
@@ -56,8 +56,9 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  font-family: var(--font-geist-sans);
+  font-family: var(--font-body);
   background: var(--background);
+  accent-color: var(--accent);
 }
 
 .toggleButton {
