@@ -66,6 +66,9 @@ const MIN_ZOOM_FOR_TRAFFIC = 12;
 // 地形（標高タイル）表現を有効化する最低ズームレベル。applyTerrain参照。
 // サイドバーの案内文（「標高データはズームレベル12以上でのみ表示されます」）と合わせる。
 const MIN_ZOOM_FOR_TERRAIN = 12;
+// AR配置ピンからこの距離（画面ピクセル）以内のクリックは、たとえピン自体の当たり判定を
+// 外れていても「空き地のクリック」とはみなさない（密集地帯での誤操作対策）。
+const EMPTY_CLICK_MARKER_GUARD_PX = 20;
 
 // 起動時、現在地が取得できればその地点を中心にズームレベルこの値・上面（真上から
 // 見下ろす）表示にする。取得できない場合は町全体を見渡せる俯瞰表示にフォールバックする。
@@ -403,20 +406,32 @@ function clearBufferData(map, key, bufferRef) {
 // ピン型アイコンのDOM要素を作成する。現在地マーカー・AR配置ピンで共用する。
 // マーカーはこの要素をmaplibre-glのレイヤーではなく地図のキャンバスコンテナに直接重ねて
 // 表示するため、地図を回転・傾けても常にカメラ正面を向いた同じ見た目になる。
+// ピンの見た目のサイズ（アイコン自体）。
+const PIN_ICON_SIZE_PX = 28;
+// ピンのクリック判定領域のサイズ。見た目より大きくして、AR配置ピンが密集している
+// 場所でも少しのズレでクリックできるようにする（実機で密集地帯のクリック精度が
+// 低い不具合が確認されたための対策。見た目のサイズ・ピンの先端位置は変えない）。
+const PIN_HIT_AREA_SIZE_PX = 44;
+
 function createPinMarkerElement(color) {
   const el = document.createElement("div");
   el.style.position = "absolute";
   el.style.top = "0";
   el.style.left = "0";
-  el.style.width = "28px";
-  el.style.height = "28px";
-  el.style.marginLeft = "-14px";
-  el.style.marginTop = "-28px";
+  el.style.width = `${PIN_HIT_AREA_SIZE_PX}px`;
+  el.style.height = `${PIN_HIT_AREA_SIZE_PX}px`;
+  el.style.marginLeft = `${-PIN_HIT_AREA_SIZE_PX / 2}px`;
+  el.style.marginTop = `${-PIN_HIT_AREA_SIZE_PX}px`;
   el.style.pointerEvents = "auto";
   el.style.cursor = "pointer";
   el.style.display = "none";
+  // アイコン自体は当たり判定領域の下端中央に、見た目のサイズのまま配置する
+  // （ピンの先端＝実際の位置、という見え方をそのまま保つため）。
+  const iconOffsetX = (PIN_HIT_AREA_SIZE_PX - PIN_ICON_SIZE_PX) / 2;
+  const iconOffsetY = PIN_HIT_AREA_SIZE_PX - PIN_ICON_SIZE_PX;
   el.innerHTML =
-    '<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">' +
+    `<svg viewBox="0 0 ${PIN_ICON_SIZE_PX} ${PIN_ICON_SIZE_PX}" width="${PIN_ICON_SIZE_PX}" height="${PIN_ICON_SIZE_PX}" ` +
+    `style="position:absolute;left:${iconOffsetX}px;top:${iconOffsetY}px;" xmlns="http://www.w3.org/2000/svg">` +
     `<path d="M14 1c-6.075 0-11 4.925-11 11 0 8.25 11 15 11 15s11-6.75 11-15c0-6.075-4.925-11-11-11z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>` +
     '<circle cx="14" cy="12" r="4.2" fill="#ffffff"/>' +
     "</svg>";
@@ -1221,6 +1236,17 @@ export default function MapView() {
       // 森林簿・地籍・建物のいずれも無い（=AR配置ピンでもない）場所をクリックした場合は、
       // 一人称視点の開始地点として選ぶ（AR配置ピンは独自のクリック処理を持ち、ここには来ない）。
       if (!features.length) {
+        // ただし、AR配置ピンが密集していると、ピンのすぐ近く（当たり判定のわずかに外）を
+        // クリックしただけで意図せずこちらに来てしまい、情報の無い小さなポップアップが
+        // 開いたように見える不具合があった（実機で確認）。近くにAR配置ピンがある場合は
+        // 「空き地のクリック」とはみなさず、何もしない（ユーザーに再度ピンをクリックし
+        // 直してもらう）ようにする。
+        const nearbyPlacementMarker = [...arPlacementMarkersRef.current.values()].some((marker) => {
+          const screenPos = map.project([marker.lng, marker.lat]);
+          return Math.hypot(screenPos.x - event.point.x, screenPos.y - event.point.y) < EMPTY_CLICK_MARKER_GUARD_PX;
+        });
+        if (nearbyPlacementMarker) return;
+
         setFirstPersonPendingOrigin({ lng: event.lngLat.lng, lat: event.lngLat.lat });
         return;
       }
