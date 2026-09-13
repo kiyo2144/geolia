@@ -1,7 +1,7 @@
 import ArViewLoader from "./ArViewLoader";
 
 export const metadata = {
-  title: "AR閲覧 | geolia",
+  title: "ARビュー | geolia",
 };
 
 export default function ArViewPage() {

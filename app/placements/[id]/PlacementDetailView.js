@@ -102,7 +102,7 @@ export function PlacementDetailView({ id }) {
               ARで見る
             </Link>
             <p className={styles.hint}>
-              この場所の近く（半径300m以内）にいるときに「AR閲覧」で表示されます。
+              この場所の近く（半径300m以内）にいるときに「ARビュー」で表示されます。
             </p>
           </div>
         </>

@@ -5,7 +5,7 @@
   max-width: 960px;
   margin: 0 auto;
   padding: 64px 24px;
-  font-family: var(--font-geist-sans);
+  font-family: var(--font-body);
 }
 
 .hero {

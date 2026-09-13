@@ -6,7 +6,7 @@ const NAV_LINKS = [
   { href: "/placements", label: "配置一覧" },
   { href: "/datasets", label: "データセット" },
   { href: "/ar/new", label: "AR設置" },
-  { href: "/ar/view", label: "AR閲覧" },
+  { href: "/ar/view", label: "ARビュー" },
   { href: "/about", label: "About" },
 ];
 
