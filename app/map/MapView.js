@@ -619,7 +619,7 @@ export default function MapView() {
     popupContent.className = styles.firstPersonPopup;
     const confirmButton = document.createElement("button");
     confirmButton.type = "button";
-    confirmButton.textContent = "一人称視点で確認";
+    confirmButton.textContent = "ARシュミレーション";
     confirmButton.addEventListener("click", () => {
       setFirstPersonOrigin(firstPersonPendingOrigin);
       setFirstPersonPendingOrigin(null);
