@@ -1,7 +1,8 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Suspense, useRef } from "react";
+import { Suspense, useMemo, useRef } from "react";
+import * as THREE from "three";
 import { AnimatedGifPlaneObject } from "../_shared/components/AnimatedGifPlaneObject";
 import { ImagePlaneObject } from "../_shared/components/ImagePlaneObject";
 import { OrientedCamera } from "../_shared/components/OrientedCamera";
@@ -53,6 +54,36 @@ export function DetailedPlacement({ placement, url, motionAssetUrl }) {
   );
 }
 
+const DEBUG_DISTANCE_LABEL_HEIGHT_OFFSET = 1; // 詳細表示のオブジェクトの上に出す高さ(m)
+
+/** デバッグ用: detail表示のオブジェクトの上に、デバイスからの距離だけを出す簡易ラベル（原因切り分けが済んだら削除する） */
+function DebugDistanceLabel({ distanceMeters }) {
+  const texture = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "rgba(230, 57, 70, 0.85)";
+    ctx.beginPath();
+    ctx.roundRect(0, 16, canvas.width, 64, 20);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 36px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`約${distanceMeters.toFixed(1)}m`, canvas.width / 2, 48);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }, [distanceMeters]);
+
+  return (
+    <sprite position={[0, DEBUG_DISTANCE_LABEL_HEIGHT_OFFSET, 0]} scale={[0.8, 0.3, 1]}>
+      <spriteMaterial map={texture} depthWrite={false} transparent />
+    </sprite>
+  );
+}
+
 // 自己位置の更新間隔(最大1秒, useGeolocationのWATCH_POLL_INTERVAL_MS)の間、
 // AR配置側の描画位置が完全に静止してしまい、歩いている間「画面に張り付いて
 // 追従している」ように見える問題への対策。毎フレーム、現在の描画位置から
@@ -90,7 +121,7 @@ function SmoothedPositionGroup({ target, children }) {
  * tierが'detail'のものは実データを、'simple'のものはラベルのみを表示する
  * （要件定義 docs/requirements.md 4.2.1章のLOD方式）。
  */
-export function ArViewScene({ orientation, placements, getPublicUrl }) {
+export function ArViewScene({ orientation, placements, getPublicUrl, showDebugInfo = false }) {
   const hasSplat = placements.some(
     (p) => p.tier === "detail" && p.asset_type === "gaussian_splat",
   );
@@ -115,17 +146,20 @@ export function ArViewScene({ orientation, placements, getPublicUrl }) {
           target={[placement.localX, placement.localY, placement.localZ]}
         >
           {placement.tier === "detail" ? (
-            <Suspense fallback={null}>
-              <DetailedPlacement
-                placement={placement}
-                url={getPublicUrl(placement.storage_path)}
-                motionAssetUrl={
-                  placement.motion_storage_path
-                    ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
-                    : null
-                }
-              />
-            </Suspense>
+            <>
+              <Suspense fallback={null}>
+                <DetailedPlacement
+                  placement={placement}
+                  url={getPublicUrl(placement.storage_path)}
+                  motionAssetUrl={
+                    placement.motion_storage_path
+                      ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
+                      : null
+                  }
+                />
+              </Suspense>
+              {showDebugInfo && <DebugDistanceLabel distanceMeters={placement.distance_meters} />}
+            </>
           ) : (
             <PlacementLabelSprite label={placement.label} distanceMeters={placement.distance_meters} />
           )}

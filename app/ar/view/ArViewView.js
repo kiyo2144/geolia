@@ -262,6 +262,7 @@ export function ArViewView() {
             orientation={deviceOrientation.orientation}
             placements={placementsWithGeometry}
             getPublicUrl={getPublicUrl}
+            showDebugInfo={SHOW_DEBUG_INFO}
           />
 
           <RadarMinimap
