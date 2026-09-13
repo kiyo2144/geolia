@@ -633,7 +633,10 @@ export default function MapView() {
     popupContent.appendChild(confirmButton);
     popupContent.appendChild(cancelButton);
 
-    const popup = new Popup({ closeButton: false, closeOnClick: false, offset: 20 }).setDOMContent(
+    // offsetはピン先端（アンカー座標）からの距離。ピン自体の見た目の高さ（約34px）より
+    // 小さいと、ポップアップの吹き出し先端がピンのアイコン本体と重なって表示が崩れる
+    // （ボタン名を「ARシュミレーション」に変更した際に発覚）。
+    const popup = new Popup({ closeButton: false, closeOnClick: false, offset: 40 }).setDOMContent(
       popupContent,
     );
     const marker = new Marker({
