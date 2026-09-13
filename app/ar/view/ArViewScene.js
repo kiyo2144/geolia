@@ -78,8 +78,14 @@ function DebugDistanceLabel({ distanceMeters }) {
   }, [distanceMeters]);
 
   return (
-    <sprite position={[0, DEBUG_DISTANCE_LABEL_HEIGHT_OFFSET, 0]} scale={[0.8, 0.3, 1]}>
-      <spriteMaterial map={texture} depthWrite={false} transparent />
+    // デバッグ用の補助表示のため、角度によって本体の裏に隠れて見えなくならないよう
+    // 深度テストを無効にして常に手前に描画する（renderOrderで描画順も後にする）。
+    <sprite
+      position={[0, DEBUG_DISTANCE_LABEL_HEIGHT_OFFSET, 0]}
+      scale={[0.8, 0.3, 1]}
+      renderOrder={999}
+    >
+      <spriteMaterial map={texture} depthWrite={false} depthTest={false} transparent />
     </sprite>
   );
 }
