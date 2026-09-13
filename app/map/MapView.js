@@ -927,10 +927,15 @@ export default function MapView() {
         event.stopPropagation();
         const marker = arPlacementMarkersRef.current.get(id);
         if (!marker) return;
+        // Popup.addTo()は、既に地図に追加済みのポップアップに対して呼ぶと内部でremove()を
+        // 先に実行し、"close"イベント（setSelectedArPlacement(null)）を同期的に発火させる。
+        // そのためsetSelectedArPlacementをaddTo()より先に呼ぶと、直後のclose起因のnull更新に
+        // 上書きされて空白のポップアップになる（2件目以降のAR配置クリックで発生）。
+        // addTo()を先に済ませてから最新の配置データをセットすることで、この上書きを避ける。
+        arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).addTo(map);
         // プライバシー保護のため、緯度・経度は表示しない（ユーザー登録・公開設定の
         // 導入までの暫定対応。将来的にユーザーが公開/非公開を選択できるようにする）。
         setSelectedArPlacement(marker.properties);
-        arPlacementPopupRef.current?.setLngLat([marker.lng, marker.lat]).addTo(map);
       });
 
       const groundLine = createGroundLineElements(groundLinesSvgRef.current, AR_PLACEMENT_MARKER_COLOR);
