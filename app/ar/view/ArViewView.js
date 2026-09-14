@@ -300,6 +300,13 @@ export function ArViewView() {
               </p>
             )}
 
+            {deviceOrientation.permissionState === "denied" && (
+              <p className={styles.error}>
+                端末の向きへのアクセスが拒否されているため、周辺のAR配置が正しい方向に表示されません。
+                設定 &gt; Safari &gt; 「モーションと画面の向きへのアクセス」を確認してください。
+              </p>
+            )}
+
             {/* 自己位置のGPS高度の信頼性判定のデバッグ表示（原因切り分けが済んだら削除する） */}
             {SHOW_DEBUG_INFO && geolocation.position && (
               <p className={styles.status}>
