@@ -24,7 +24,7 @@ import styles from "./ArViewView.module.css";
 
 // 位置追従・GPS高度の原因切り分け用に追加したデバッグ表示の一時的な表示切り替え。
 // 調査が必要になったらtrueに戻す。
-const SHOW_DEBUG_INFO = false;
+const SHOW_DEBUG_INFO = true;
 
 // 要件定義 docs/requirements.md 4.2.1章の初期値
 const FETCH_RADIUS_METERS = 300; // 段階1: 取得半径
@@ -326,6 +326,26 @@ export function ArViewView() {
                 生の緯度 {geolocation.debugInfo.lastRawLat.toFixed(6)}　生の経度{" "}
                 {geolocation.debugInfo.lastRawLng.toFixed(6)}　直前と同座標{" "}
                 {geolocation.debugInfo.sameAsPreviousRawCount}回
+              </p>
+            )}
+
+            {/* 配置が0件表示になる不具合の原因切り分け用（原因切り分けが済んだら削除する） */}
+            {SHOW_DEBUG_INFO && (
+              <p className={styles.status}>
+                取得 {rawPlacements.length}件　detail{" "}
+                {placementsWithGeometry.filter((p) => p.tier === "detail").length}件　simple{" "}
+                {placementsWithGeometry.filter((p) => p.tier === "simple").length}件　視野内候補{" "}
+                {stickyDetailIds.size}件　端末の向き{" "}
+                {deviceHeading === null ? "取得できていません" : `約${Math.round(deviceHeading)}度`}
+              </p>
+            )}
+            {SHOW_DEBUG_INFO && placementsRaw[0] && (
+              <p className={styles.status}>
+                最も近い配置: {placementsRaw[0].label}　距離 約
+                {Math.round(placementsRaw[0].distance_meters)}m　方位角 約
+                {Math.round(placementsRaw[0].bearing)}度　正面との角度差 約
+                {Math.round(placementsRaw[0].angleDiff)}度　高度差 約
+                {placementsRaw[0].localY.toFixed(1)}m
               </p>
             )}
           </div>
