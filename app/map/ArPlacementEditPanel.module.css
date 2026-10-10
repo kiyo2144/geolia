@@ -5,6 +5,8 @@
   z-index: 3;
   width: 320px;
   max-width: calc(100vw - 1.5rem);
+  max-height: calc(100vh - 1.5rem);
+  overflow-y: auto;
   border-radius: 10px;
   background: rgba(13, 17, 23, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.15);

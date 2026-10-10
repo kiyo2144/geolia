@@ -21,6 +21,11 @@ export function ArPlacementEditPanel({ edit }) {
     changeHeight,
     flipVertical,
     resetAdjustment,
+    position,
+    movedDistanceMeters,
+    isPickingPosition,
+    setIsPickingPosition,
+    nudgePosition,
     isSaving,
     saveStatus,
     save,
@@ -59,7 +64,44 @@ export function ArPlacementEditPanel({ edit }) {
           <p className={styles.hint}>横ドラッグ=回転 ・ 縦ドラッグ=高さ ・ ホイール=拡大縮小</p>
         )}
 
+        <button
+          type="button"
+          className={isPickingPosition ? styles.toggleButtonActive : styles.toggleButton}
+          onClick={() => setIsPickingPosition((current) => !current)}
+        >
+          サブマップで移動先を選ぶ: {isPickingPosition ? "ON" : "OFF"}
+        </button>
+        {isPickingPosition && (
+          <p className={styles.hint}>サブマップをクリックすると、その地点へこのAR配置を移動します</p>
+        )}
+        {position && (
+          <p className={styles.hint}>
+            緯度 {position.lat.toFixed(6)}　経度 {position.lng.toFixed(6)}
+            {movedDistanceMeters >= 0.05 && `（元の位置から約${movedDistanceMeters.toFixed(1)}m移動）`}
+          </p>
+        )}
+
         <div className={styles.adjustGrid}>
+          <span>位置(前後)</span>
+          <div className={styles.actions}>
+            <button type="button" onClick={() => nudgePosition({ forward: -1 })}>
+              手前へ
+            </button>
+            <button type="button" onClick={() => nudgePosition({ forward: 1 })}>
+              奥へ
+            </button>
+          </div>
+
+          <span>位置(左右)</span>
+          <div className={styles.actions}>
+            <button type="button" onClick={() => nudgePosition({ right: -1 })}>
+              ◀ 左へ
+            </button>
+            <button type="button" onClick={() => nudgePosition({ right: 1 })}>
+              右へ ▶
+            </button>
+          </div>
+
           <span>回転</span>
           <div className={styles.actions}>
             <button type="button" onClick={() => rotate(-1)}>

@@ -89,6 +89,7 @@ export function FirstPersonMinimap({
   placementPickActive,
   onPlacementPick,
   pickedLngLat,
+  pickHintText,
   onPlacementSelect,
   editingPlacementId,
 }) {
@@ -190,6 +191,9 @@ export function FirstPersonMinimap({
         if (onPlacementSelectRef.current) {
           el.style.cursor = "pointer";
           el.addEventListener("click", (event) => {
+            // 位置の選択中は、マーカー上のクリックも「移動先の指定」として地図側に任せる
+            // （別の配置の編集に切り替わってしまうのを防ぐ）。
+            if (placementPickActiveRef.current) return;
             event.stopPropagation();
             onPlacementSelectRef.current?.(placement);
           });
@@ -298,7 +302,9 @@ export function FirstPersonMinimap({
       />
 
       <p className={styles.hintText}>
-        {placementPickActive ? "クリックでAR設置位置を選択" : "クリックでその場所へ移動"}
+        {placementPickActive
+          ? (pickHintText ?? "クリックでAR設置位置を選択")
+          : "クリックでその場所へ移動"}
       </p>
     </div>
   );

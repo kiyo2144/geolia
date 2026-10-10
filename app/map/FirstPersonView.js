@@ -290,7 +290,15 @@ export function FirstPersonView({
   });
 
   // 既存のAR配置をその場で編集する機能。サブマップ上の配置マーカーをクリックすると開く。
-  const arEdit = useArPlacementEdit({ supabase, onSaved: refetchPlacements });
+  // 位置の編集(サブマップクリック・前後左右ボタン)のため、座標変換・標高・移動範囲も渡す。
+  const arEdit = useArPlacementEdit({
+    project: sceneData?.project,
+    sampleElevation: sceneData?.sampleElevation,
+    boundsMeters: RADIUS_METERS * 0.95,
+    playerStateRef,
+    supabase,
+    onSaved: refetchPlacements,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -493,18 +501,33 @@ export function FirstPersonView({
                     scale: arEdit.adjustment.scale,
                   }
                 : placement;
-              const groundLocalY = placement.localY - (placement.vertical_offset ?? 0);
+              // 編集中は、移動先の位置・その地点の地表面の高さを使って描画する
+              // （位置を動かしていない間は、保存済みの値と同じ結果になる）。
+              const editPosition = isEditing ? arEdit.position : null;
+              const editProjected = editPosition
+                ? sceneData.project(editPosition.lng, editPosition.lat)
+                : null;
+              const renderedLocalX = editProjected ? editProjected.x : placement.localX;
+              const renderedLocalZ = editProjected ? -editProjected.y : placement.localZ;
+              const groundLocalY =
+                isEditing && arEdit.groundElevation !== null
+                  ? arEdit.groundElevation - sceneData.minElevation
+                  : placement.localY - (placement.vertical_offset ?? 0);
               const renderedLocalY = isEditing ? groundLocalY + arEdit.adjustment.y : placement.localY;
               const ghost = isEditing
                 ? isPlacementOccluded(
-                    { lng: placement.lng, lat: placement.lat, altitude: arEdit.editingPlacement.groundElevation + arEdit.adjustment.y },
+                    {
+                      lng: editPosition?.lng ?? placement.lng,
+                      lat: editPosition?.lat ?? placement.lat,
+                      altitude: (arEdit.groundElevation ?? arEdit.editingPlacement.groundElevation) + arEdit.adjustment.y,
+                    },
                     { sampleElevation: sceneData.sampleElevation, project: sceneData.project, buildingFeatures: sceneData.buildingFeatures },
                   )
                 : occludedPlacementIds.has(placement.id);
 
               return (
                 <group key={placement.id}>
-                  <group position={[placement.localX, renderedLocalY, placement.localZ]}>
+                  <group position={[renderedLocalX, renderedLocalY, renderedLocalZ]}>
                     <GhostablePlacement ghost={ghost}>
                       <DetailedPlacement
                         placement={renderedPlacement}
@@ -518,7 +541,7 @@ export function FirstPersonView({
                     </GhostablePlacement>
                   </group>
                   {isEditing && (
-                    <EditHighlightRing position={[placement.localX, groundLocalY + 0.02, placement.localZ]} />
+                    <EditHighlightRing position={[renderedLocalX, groundLocalY + 0.02, renderedLocalZ]} />
                   )}
                 </group>
               );
@@ -560,9 +583,19 @@ export function FirstPersonView({
           boundsMeters={RADIUS_METERS * 0.95}
           playerStateRef={playerStateRef}
           teleportRequestRef={teleportRequestRef}
-          placementPickActive={desktopPlacement.active && desktopPlacement.step === "aiming"}
-          onPlacementPick={desktopPlacement.pickAimPosition}
-          pickedLngLat={desktopPlacement.active ? desktopPlacement.aimLngLat : null}
+          placementPickActive={
+            (desktopPlacement.active && desktopPlacement.step === "aiming") ||
+            (!!arEdit.editingPlacement && arEdit.isPickingPosition)
+          }
+          onPlacementPick={arEdit.editingPlacement ? arEdit.pickPosition : desktopPlacement.pickAimPosition}
+          pickedLngLat={
+            desktopPlacement.active
+              ? desktopPlacement.aimLngLat
+              : arEdit.editingPlacement
+                ? arEdit.position
+                : null
+          }
+          pickHintText={arEdit.editingPlacement ? "クリックでAR配置の移動先を選択" : undefined}
           onPlacementSelect={desktopPlacement.active ? undefined : arEdit.open}
           editingPlacementId={arEdit.editingPlacement?.id ?? null}
         />
