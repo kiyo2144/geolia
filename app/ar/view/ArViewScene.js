@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { AnimatedGifPlaneObject } from "../_shared/components/AnimatedGifPlaneObject";
 import { HtmlPlaneObject } from "../_shared/components/HtmlPlaneObject";
@@ -125,10 +125,21 @@ function SmoothedPositionGroup({ target, children }) {
   return <group ref={groupRef}>{children}</group>;
 }
 
-// 調整モードで、タップした位置に最も近いコンテンツを選ぶ際の、画面上の許容距離(px)
+
+// 調整モードで、タップした位置に最も近いコンテンツを選ぶ際の、画面上の許容距離(px)の下限。
+// 大きく表示されているコンテンツは、見かけの半径がこれより大きければそちらを使う
+// （中心から離れた部分をタップしても選べるようにするため）。
 const PICK_RADIUS_PX = 100;
+const MAX_APPARENT_RADIUS_PX = 220;
 const SELECTION_RING_COLOR = "#4da6ff";
-const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0 };
+const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0, scale: 1 };
+const ZERO_GLOBAL_ADJUSTMENT = { east: 0, north: 0, yaw: 0 };
+// 「正面に呼ぶ」で置く距離(m)。コンテンツの大きさ(scale)に比例して離し、画面に収める。
+const FRONT_DISTANCE_PER_SCALE_METERS = 2;
+const FRONT_DISTANCE_MIN_METERS = 2;
+const FRONT_DISTANCE_MAX_METERS = 15;
+// VRMなど原点が足元にあるものは、目の高さではなく少し下げて全身が見えるようにする
+const FRONT_VERTICAL_OFFSET_BY_ASSET_TYPE = { vrm: -1.2 };
 
 /** 調整モードで選択中のコンテンツの周りに表示する輪（深度テストなしで常に手前に見せる） */
 function SelectionRing() {
@@ -148,41 +159,132 @@ function SelectionRing() {
 }
 
 /**
- * 画面上のタップ位置から、最も近い詳細表示のコンテンツを選ぶ。
- * 点群・Splat・VRM・HTMLなど種別を問わず選べるよう、レイキャストではなく
- * 各コンテンツの基準点を画面座標へ投影した距離で判定する。
- * pickRequestRef に {x, y}（clientX/clientY）が入っていたら1フレームで処理して消費する。
+ * 調整モード中の、Canvas内で行う処理をまとめたコンポーネント（毎フレーム1回）。
+ * 1. タップ位置から、最も近い詳細表示のコンテンツを選ぶ（pickRequestRef）
+ *    点群・Splat・VRM・HTMLなど種別を問わず選べるよう、レイキャストではなく
+ *    各コンテンツの基準点を画面座標へ投影した距離で判定する。何も無い所のタップは選択解除。
+ * 2. 「正面に呼ぶ」: 選択中のコンテンツを、カメラの正面でこちらを向く位置へ移す補正値を求める
+ *    （bringRequestRef）。求めた値はonBroughtで親へ返し、親が状態に反映する。
+ * 3. 選択中のコンテンツの画面上の位置・大きさを、ハイライト用のDOMを持つ親へonReticleUpdateで毎フレーム伝える。
  */
-function PlacementPicker({ groupsRef, pickRequestRef, onPick }) {
+function AdjustInteractionBridge({
+  groupsRef,
+  latestRef,
+  selectedId,
+  pickRequestRef,
+  bringRequestRef,
+  onReticleUpdate,
+  onPick,
+  onBrought,
+}) {
   const camera = useThree((state) => state.camera);
   const gl = useThree((state) => state.gl);
 
   useFrame(() => {
-    const request = pickRequestRef?.current;
-    if (!request) return;
-    pickRequestRef.current = null;
-
+    const { placementsById, adjustments } = latestRef.current;
     const rect = gl.domElement.getBoundingClientRect();
-    const pointerX = request.x - rect.left;
-    const pointerY = request.y - rect.top;
-
+    const focalPx = rect.height / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const worldPosition = new THREE.Vector3();
-    let bestId = null;
-    let bestDistance = PICK_RADIUS_PX;
-    for (const [id, object] of groupsRef.current) {
+
+    // 画面上の見かけの半径(px)の概算。基準の大きさを横幅1mとして、スケールと距離から求める
+    const apparentRadiusPx = (id, distanceMeters) => {
+      const totalScale = (placementsById.get(id)?.scale ?? 1) * (adjustments.byId[id]?.scale ?? 1);
+      return Math.min(
+        (0.5 * totalScale * focalPx) / Math.max(distanceMeters, 0.1),
+        MAX_APPARENT_RADIUS_PX,
+      );
+    };
+
+    // 画面座標へ投影する。カメラの後ろ・遠方クリップ面の外ならnull
+    const project = (object) => {
       object.getWorldPosition(worldPosition);
+      const distance = worldPosition.distanceTo(camera.position);
       worldPosition.project(camera);
-      // カメラの後ろ・遠方クリップ面の外は対象外
-      if (worldPosition.z < -1 || worldPosition.z > 1) continue;
-      const screenX = ((worldPosition.x + 1) / 2) * rect.width;
-      const screenY = ((1 - worldPosition.y) / 2) * rect.height;
-      const distance = Math.hypot(screenX - pointerX, screenY - pointerY);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        bestId = id;
+      if (worldPosition.z < -1 || worldPosition.z > 1) return null;
+      return {
+        x: ((worldPosition.x + 1) / 2) * rect.width,
+        y: ((1 - worldPosition.y) / 2) * rect.height,
+        distance,
+      };
+    };
+
+    const pickRequest = pickRequestRef?.current;
+    if (pickRequest) {
+      pickRequestRef.current = null;
+      const pointerX = pickRequest.x - rect.left;
+      const pointerY = pickRequest.y - rect.top;
+
+      let bestId = null;
+      let bestDistance = Infinity;
+      for (const [id, object] of groupsRef.current) {
+        const screen = project(object);
+        if (!screen) continue;
+        const distance = Math.hypot(screen.x - pointerX, screen.y - pointerY);
+        const radius = Math.max(PICK_RADIUS_PX, apparentRadiusPx(id, screen.distance));
+        if (distance <= radius && distance < bestDistance) {
+          bestDistance = distance;
+          bestId = id;
+        }
+      }
+      onPick?.(bestId);
+    }
+
+    const bringRequest = bringRequestRef?.current;
+    if (bringRequest) {
+      bringRequestRef.current = null;
+      const object = groupsRef.current.get(bringRequest.id);
+      const placement = placementsById.get(bringRequest.id);
+      if (object?.parent && placement) {
+        const current = adjustments.byId[bringRequest.id] ?? ZERO_INDIVIDUAL_ADJUSTMENT;
+        const totalScale = (placement.scale ?? 1) * current.scale;
+        const distance = THREE.MathUtils.clamp(
+          FRONT_DISTANCE_PER_SCALE_METERS * totalScale,
+          FRONT_DISTANCE_MIN_METERS,
+          FRONT_DISTANCE_MAX_METERS,
+        );
+
+        // カメラの向きの水平成分だけを使い、傾けて見ていても同じ高さに置く
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+        direction.y = 0;
+        if (direction.lengthSq() < 1e-6) direction.set(0, 0, -1);
+        direction.normalize();
+
+        const target = new THREE.Vector3(
+          direction.x * distance,
+          FRONT_VERTICAL_OFFSET_BY_ASSET_TYPE[placement.asset_type] ?? 0,
+          direction.z * distance,
+        );
+
+        // 補正値は親(GPS追従の<group>)から見た位置なので、ワールド座標から変換して求める
+        object.parent.updateWorldMatrix(true, false);
+        const local = object.parent.worldToLocal(target.clone());
+        // こちら(原点のカメラ)を向く向き。全体補正の回転と、データ自身の向きは引いておく
+        const facingYaw = Math.atan2(-target.x, -target.z);
+        const yaw = facingYaw - adjustments.global.yaw - (placement.rotation_y ?? 0);
+
+        onBrought?.(bringRequest.id, {
+          east: local.x,
+          north: -local.z,
+          up: local.y,
+          yaw,
+          scale: current.scale,
+        });
       }
     }
-    if (bestId !== null) onPick?.(bestId);
+
+    // 選択中のコンテンツへ、ハイライト(リング+名前)のDOMを追従させる（DOM更新は親のコールバックで行う）
+    const object = selectedId ? groupsRef.current.get(selectedId) : null;
+    const screen = object ? project(object) : null;
+    if (!screen) {
+      onReticleUpdate?.(null);
+    } else {
+      onReticleUpdate?.({
+        x: screen.x,
+        y: screen.y,
+        diameter: Math.max(apparentRadiusPx(selectedId, screen.distance) * 2, 56),
+      });
+    }
   });
 
   return null;
@@ -193,8 +295,8 @@ function PlacementPicker({ groupsRef, pickRequestRef, onPick }) {
  * tierが'detail'のものは実データを、'simple'のものはラベルのみを表示する
  * （要件定義 docs/requirements.md 4.2.1章のLOD方式）。
  *
- * adjustments: 画面を開いている間だけの見た目上の位置・角度の補正（DBには保存しない）。
- *   { byId: { [id]: { east, north, up, yaw } }, global: { east, north, yaw } }
+ * adjustments: 画面を開いている間だけの見た目上の位置・角度・大きさの補正（DBには保存しない）。
+ *   { byId: { [id]: { east, north, up, yaw, scale } }, global: { east, north, yaw } }
  *   いずれも「ユーザーの現在地を原点としたワールド固定」の値で、歩いても画面に張り付かない。
  *   global は全コンテンツをまとめて、現在地を中心に yaw だけ回してから east/north へ動かす
  *   （コンパスのズレのように全体に共通して出る誤差の補正用）。
@@ -208,13 +310,25 @@ export function ArViewScene({
   selectedId = null,
   isAdjustMode = false,
   pickRequestRef = null,
+  bringRequestRef = null,
+  onReticleUpdate = null,
   onPick = null,
+  onBrought = null,
 }) {
   const hasSplat = placements.some(
     (p) => p.tier === "detail" && p.asset_type === "gaussian_splat",
   );
   const groupsRef = useRef(new Map());
-  const globalAdjustment = adjustments?.global ?? { east: 0, north: 0, yaw: 0 };
+  const globalAdjustment = adjustments?.global ?? ZERO_GLOBAL_ADJUSTMENT;
+
+  // Canvas内の毎フレーム処理から、最新のplacements・補正値を参照するためのref
+  const latestRef = useRef({ placementsById: new Map(), adjustments: { byId: {}, global: ZERO_GLOBAL_ADJUSTMENT } });
+  useEffect(() => {
+    latestRef.current = {
+      placementsById: new Map(placements.map((placement) => [placement.id, placement])),
+      adjustments: adjustments ?? { byId: {}, global: ZERO_GLOBAL_ADJUSTMENT },
+    };
+  });
 
   return (
     <Canvas
@@ -230,7 +344,16 @@ export function ArViewScene({
       <ambientLight intensity={1.2} />
       {hasSplat && <SparkSetup />}
       {isAdjustMode && (
-        <PlacementPicker groupsRef={groupsRef} pickRequestRef={pickRequestRef} onPick={onPick} />
+        <AdjustInteractionBridge
+          groupsRef={groupsRef}
+          latestRef={latestRef}
+          selectedId={selectedId}
+          pickRequestRef={pickRequestRef}
+          bringRequestRef={bringRequestRef}
+          onReticleUpdate={onReticleUpdate}
+          onPick={onPick}
+          onBrought={onBrought}
+        />
       )}
 
       {/* 全体補正: 現在地(原点)を中心に回してから平行移動する（localX=東, localZ=-北） */}
@@ -258,6 +381,7 @@ export function ArViewScene({
                 }
                 position={[adjustment.east, adjustment.up, -adjustment.north]}
                 rotation={[0, adjustment.yaw, 0]}
+                scale={adjustment.scale}
               >
                 {isDetail ? (
                   <>

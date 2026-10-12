@@ -160,3 +160,73 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* 調整モード: 選択中のコンテンツへ追従するハイライトと、コンパクトな操作バー */
+.selectionReticle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  --reticle-size: 80px;
+}
+
+.selectionReticleRing {
+  position: absolute;
+  width: var(--reticle-size);
+  height: var(--reticle-size);
+  left: calc(var(--reticle-size) / -2);
+  top: calc(var(--reticle-size) / -2);
+  border-radius: 50%;
+  border: 3px solid #4da6ff;
+  box-shadow:
+    0 0 0 2px rgba(13, 17, 23, 0.55),
+    0 0 18px 4px rgba(77, 166, 255, 0.65);
+  animation: reticlePulse 1.4s ease-in-out infinite;
+}
+
+.selectionReticleLabel {
+  position: absolute;
+  top: calc(var(--reticle-size) / 2 + 8px);
+  left: 0;
+  transform: translateX(-50%);
+  max-width: 70vw;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: #1f6feb;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes reticlePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.adjustStatus {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #f0f3f7;
+}
+
+.adjustFineToggle {
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: #c9d1d9;
+  font-size: 0.75rem;
+  cursor: pointer;
+}

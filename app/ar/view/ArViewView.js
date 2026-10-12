@@ -46,14 +46,19 @@ const NEAR_DISTANCE_METERS = 30;
 // 遅れが数m相当になり、AR配置が自分に付いてくるように見えてしまっていた）。
 const AR_VIEW_POSITION_EMA_ALPHA = 0.6;
 
-// 調整モード（画面を開いている間だけの見た目上の位置・角度の補正）の操作量
+// 調整モード（画面を開いている間だけの見た目上の位置・角度・大きさの補正）の操作量
 const ADJUST_ROTATE_RADIANS_PER_PIXEL = 0.012; // 1本指の横ドラッグ（AR設置画面と同じ）
 const ADJUST_MOVE_METERS_PER_PIXEL = 0.004; // 2本指ドラッグ
 const ADJUST_ROTATE_STEP_RADIANS = Math.PI / 12; // ボタン1回あたり15度
 const ADJUST_MOVE_STEP_METERS = 0.5; // ボタン1回あたり
 const ADJUST_HEIGHT_STEP_METERS = 0.2; // ボタン1回あたり
-const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0 };
+const ADJUST_SCALE_STEP_RATIO = 1.15; // ボタン1回あたり
+// 個別の拡大率（元の大きさに対する倍率）の範囲
+const ADJUST_MIN_SCALE = 0.1;
+const ADJUST_MAX_SCALE = 20;
+const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0, scale: 1 };
 const ZERO_GLOBAL_ADJUSTMENT = { east: 0, north: 0, yaw: 0 };
+
 
 // 自己位置の標高タイルサンプラーを取得する範囲（度）。AR設置画面と違い歩き回るため、
 // 少し動くたびに取得し直さずに済むよう広めに取っている（約1km四方）。
@@ -260,20 +265,28 @@ export function ArViewView() {
     [supabase],
   );
 
-  // --- 調整モード: 画面を開いている間だけの、見た目上の位置・角度の補正 ---
+  // --- 調整モード: 画面を開いている間だけの、見た目上の位置・角度・大きさの補正 ---
   // DBには保存せず、画面を閉じる・リロードすると破棄される（他のユーザーにも影響しない）。
-  // 値は「現在地を原点としたワールド固定」の東西・南北・高さ・水平回転で持つ。
+  // 値は「現在地を原点としたワールド固定」の東西・南北・高さ・水平回転・拡大率で持つ。
+  // 操作対象は「タップで選んだ1件（個別）」で、何も選んでいない間は「全体」を動かす。
   const [isAdjustMode, setIsAdjustMode] = useState(false);
-  // trueの間は、選択中の個別コンテンツではなく全コンテンツへまとめて適用する
-  const [applyToAll, setApplyToAll] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [isFineAdjustOpen, setIsFineAdjustOpen] = useState(false);
   const [individualAdjustments, setIndividualAdjustments] = useState({});
   const [globalAdjustment, setGlobalAdjustment] = useState(ZERO_GLOBAL_ADJUSTMENT);
+  // 「正面に呼ぶ」を押す前の補正値（「元の位置に戻す」で復元する）
+  const [frontSavedAdjustments, setFrontSavedAdjustments] = useState({});
   const pickRequestRef = useRef(null);
+  const bringRequestRef = useRef(null);
+  const reticleRef = useRef(null);
   const deviceHeadingRef = useRef(null);
+  const individualAdjustmentsRef = useRef({});
   useEffect(() => {
     deviceHeadingRef.current = deviceHeading;
   }, [deviceHeading]);
+  useEffect(() => {
+    individualAdjustmentsRef.current = individualAdjustments;
+  }, [individualAdjustments]);
 
   const adjustments = useMemo(
     () => ({ byId: individualAdjustments, global: globalAdjustment }),
@@ -289,13 +302,13 @@ export function ArViewView() {
 
   const rotateBy = useCallback(
     (radians) => {
-      if (applyToAll) {
-        setGlobalAdjustment((prev) => ({ ...prev, yaw: prev.yaw + radians }));
-      } else if (selectedId) {
+      if (selectedId) {
         updateIndividual(selectedId, (a) => ({ ...a, yaw: a.yaw + radians }));
+      } else {
+        setGlobalAdjustment((prev) => ({ ...prev, yaw: prev.yaw + radians }));
       }
     },
-    [applyToAll, selectedId, updateIndividual],
+    [selectedId, updateIndividual],
   );
 
   // 画面の向き（コンパス方位）を基準に、前後(forward)・左右(right)へメートル単位で動かす
@@ -304,39 +317,93 @@ export function ArViewView() {
       const headingRadians = ((deviceHeadingRef.current ?? 0) * Math.PI) / 180;
       const east = Math.sin(headingRadians) * forwardMeters + Math.cos(headingRadians) * rightMeters;
       const north = Math.cos(headingRadians) * forwardMeters - Math.sin(headingRadians) * rightMeters;
-      if (applyToAll) {
-        setGlobalAdjustment((prev) => ({ ...prev, east: prev.east + east, north: prev.north + north }));
-      } else if (selectedId) {
+      if (selectedId) {
         updateIndividual(selectedId, (a) => ({ ...a, east: a.east + east, north: a.north + north }));
+      } else {
+        setGlobalAdjustment((prev) => ({ ...prev, east: prev.east + east, north: prev.north + north }));
       }
     },
-    [applyToAll, selectedId, updateIndividual],
+    [selectedId, updateIndividual],
   );
 
-  // 高さは個別のコンテンツにのみ適用する（今の表示高さからの増減）
+  // 高さ・大きさは個別のコンテンツにのみ適用する（今の表示からの増減・倍率）
   const changeHeightBy = useCallback(
     (meters) => {
-      if (applyToAll || !selectedId) return;
+      if (!selectedId) return;
       updateIndividual(selectedId, (a) => ({ ...a, up: a.up + meters }));
     },
-    [applyToAll, selectedId, updateIndividual],
+    [selectedId, updateIndividual],
   );
 
-  const resetCurrentTarget = useCallback(() => {
-    if (applyToAll) {
-      setGlobalAdjustment(ZERO_GLOBAL_ADJUSTMENT);
-    } else if (selectedId) {
+  const scaleBy = useCallback(
+    (ratio) => {
+      if (!selectedId) return;
+      updateIndividual(selectedId, (a) => ({
+        ...a,
+        scale: Math.min(Math.max(a.scale * ratio, ADJUST_MIN_SCALE), ADJUST_MAX_SCALE),
+      }));
+    },
+    [selectedId, updateIndividual],
+  );
+
+  // 選択中は、そのコンテンツの補正だけをリセットする。未選択なら全体と全ての個別補正をリセットする。
+  const resetAdjustments = useCallback(() => {
+    if (selectedId) {
       setIndividualAdjustments((prev) => {
         const next = { ...prev };
         delete next[selectedId];
         return next;
       });
+      setFrontSavedAdjustments((prev) => {
+        const next = { ...prev };
+        delete next[selectedId];
+        return next;
+      });
+    } else {
+      setIndividualAdjustments({});
+      setFrontSavedAdjustments({});
+      setGlobalAdjustment(ZERO_GLOBAL_ADJUSTMENT);
     }
-  }, [applyToAll, selectedId]);
+  }, [selectedId]);
 
-  const resetAllAdjustments = useCallback(() => {
-    setIndividualAdjustments({});
-    setGlobalAdjustment(ZERO_GLOBAL_ADJUSTMENT);
+  // 「正面に呼ぶ」: 選択中のコンテンツを、今見ている正面に、こちらを向けて置く（一時的な見やすさ用）。
+  // 具体的な位置はCanvas内（カメラの向きが分かる場所）で求め、onBroughtで受け取って反映する。
+  // もう一度押すと、押す前の補正値に戻す。
+  const toggleFront = useCallback(() => {
+    if (!selectedId) return;
+    const saved = frontSavedAdjustments[selectedId];
+    if (saved) {
+      setIndividualAdjustments((prev) => ({ ...prev, [selectedId]: saved }));
+      setFrontSavedAdjustments((prev) => {
+        const next = { ...prev };
+        delete next[selectedId];
+        return next;
+      });
+    } else {
+      bringRequestRef.current = { id: selectedId };
+    }
+  }, [selectedId, frontSavedAdjustments]);
+
+  const handleBrought = useCallback((id, adjustment) => {
+    setFrontSavedAdjustments((prev) => ({
+      ...prev,
+      [id]: individualAdjustmentsRef.current[id] ?? ZERO_INDIVIDUAL_ADJUSTMENT,
+    }));
+    setIndividualAdjustments((prev) => ({ ...prev, [id]: adjustment }));
+  }, []);
+
+  // 選択中のコンテンツの画面上の位置・大きさへ、ハイライトのDOMを合わせる（毎フレーム呼ばれる）。
+  // 毎フレームReactの再レンダーを起こさないよう、DOMを直接更新する。
+  const updateReticle = useCallback((state) => {
+    const element = reticleRef.current;
+    if (!element) return;
+    if (!state) {
+      element.style.display = "none";
+      return;
+    }
+    element.style.display = "block";
+    element.style.transform = `translate(${state.x}px, ${state.y}px)`;
+    element.style.setProperty("--reticle-size", `${state.diameter}px`);
   }, []);
 
   const adjustSurfaceRef = useArViewAdjustGestures({
@@ -347,16 +414,11 @@ export function ArViewView() {
     onRotateByDelta: (deltaPixels) => rotateBy(deltaPixels * ADJUST_ROTATE_RADIANS_PER_PIXEL),
     onMoveByDelta: (deltaX, deltaY) =>
       moveBy(-deltaY * ADJUST_MOVE_METERS_PER_PIXEL, deltaX * ADJUST_MOVE_METERS_PER_PIXEL),
+    onScaleBy: scaleBy,
   });
 
-  const detailPlacements = placementsWithGeometry.filter((p) => p.tier === "detail");
   const selectedPlacement = placementsWithGeometry.find((p) => p.id === selectedId) ?? null;
-  const currentAdjustment = applyToAll
-    ? { ...globalAdjustment, up: null }
-    : selectedId
-      ? (individualAdjustments[selectedId] ?? ZERO_INDIVIDUAL_ADJUSTMENT)
-      : null;
-  const hasAdjustTarget = applyToAll || !!selectedId;
+  const isFrontShown = !!selectedId && !!frontSavedAdjustments[selectedId];
 
   return (
     <div className={styles.wrapper}>
@@ -375,10 +437,23 @@ export function ArViewView() {
             selectedId={selectedId}
             isAdjustMode={isAdjustMode}
             pickRequestRef={pickRequestRef}
+            bringRequestRef={bringRequestRef}
+            onReticleUpdate={updateReticle}
             onPick={setSelectedId}
+            onBrought={handleBrought}
           />
 
           {isAdjustMode && <div ref={adjustSurfaceRef} className={styles.adjustSurface} />}
+
+          {/* 選択中のコンテンツへ追従するハイライト（位置・大きさはCanvas内の処理が毎フレーム更新する） */}
+          {isAdjustMode && (
+            <div ref={reticleRef} className={styles.selectionReticle} style={{ display: "none" }}>
+              <div className={styles.selectionReticleRing} />
+              {selectedPlacement && (
+                <div className={styles.selectionReticleLabel}>{selectedPlacement.label || "(名前なし)"}</div>
+              )}
+            </div>
+          )}
 
           <button
             type="button"
@@ -390,118 +465,113 @@ export function ArViewView() {
 
           {isAdjustMode && (
             <div className={styles.adjustPanel}>
+              <p className={styles.adjustStatus}>
+                {selectedPlacement ? (
+                  <>
+                    選択中: <strong>{selectedPlacement.label || "(名前なし)"}</strong>
+                  </>
+                ) : (
+                  "全体を調整中（コンテンツをタップすると、その1件だけを調整）"
+                )}
+              </p>
               <p className={styles.adjustPanelHint}>
-                画面を開いている間だけの見た目の補正です（保存されません）。
-                タップで選択 ・ 1本指スワイプで回転 ・ 2本指ドラッグで移動（PCはShift+ドラッグ）
+                スワイプ=回転 ・ 2本指ドラッグ=移動 ・ ピンチ=拡大縮小
+                {selectedPlacement ? "（空をタップで選択解除）" : ""}
+                <br />
+                画面を開いている間だけの補正です（保存されません）
               </p>
 
-              <div className={styles.adjustTargetList}>
-                {detailPlacements.length === 0 && (
-                  <span className={styles.adjustPanelHint}>調整できる表示中のコンテンツがありません</span>
+              <div className={styles.adjustButtons}>
+                {selectedPlacement && (
+                  <>
+                    <button type="button" onClick={toggleFront}>
+                      {isFrontShown ? "元の位置に戻す" : "正面に呼ぶ"}
+                    </button>
+                    <button type="button" onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}>
+                      高さ ▲
+                    </button>
+                    <button type="button" onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}>
+                      高さ ▼
+                    </button>
+                  </>
                 )}
-                {detailPlacements.map((placement) => (
-                  <button
-                    key={placement.id}
-                    type="button"
-                    className={
-                      !applyToAll && placement.id === selectedId
-                        ? styles.adjustTargetButtonActive
-                        : styles.adjustTargetButton
-                    }
-                    onClick={() => {
-                      setApplyToAll(false);
-                      setSelectedId(placement.id);
-                    }}
-                  >
-                    {placement.label || "(名前なし)"}
-                  </button>
-                ))}
+                <button type="button" onClick={resetAdjustments}>
+                  {selectedPlacement ? "選択中をリセット" : "すべてリセット"}
+                </button>
+                <button type="button" onClick={() => setIsAdjustMode(false)}>
+                  完了
+                </button>
               </div>
 
               <button
                 type="button"
-                className={applyToAll ? styles.adjustTargetButtonActive : styles.adjustTargetButton}
-                onClick={() => setApplyToAll((current) => !current)}
+                className={styles.adjustFineToggle}
+                onClick={() => setIsFineAdjustOpen((current) => !current)}
               >
-                全体に適用: {applyToAll ? "ON" : "OFF"}
+                細かく調整 {isFineAdjustOpen ? "▲" : "▼"}
               </button>
 
-              <p className={styles.adjustPanelHint}>
-                操作対象:{" "}
-                {applyToAll
-                  ? "全てのコンテンツ（現在地を中心にまとめて回転・移動）"
-                  : selectedPlacement
-                    ? selectedPlacement.label
-                    : "未選択（コンテンツをタップするか、上の一覧から選択）"}
-              </p>
+              {isFineAdjustOpen && (
+                <div className={styles.adjustGrid}>
+                  <span>回転</span>
+                  <div className={styles.adjustButtons}>
+                    <button type="button" onClick={() => rotateBy(-ADJUST_ROTATE_STEP_RADIANS)}>
+                      ◀
+                    </button>
+                    <button type="button" onClick={() => rotateBy(ADJUST_ROTATE_STEP_RADIANS)}>
+                      ▶
+                    </button>
+                  </div>
 
-              <div className={styles.adjustGrid}>
-                <span>回転</span>
-                <div className={styles.adjustButtons}>
-                  <button type="button" disabled={!hasAdjustTarget} onClick={() => rotateBy(-ADJUST_ROTATE_STEP_RADIANS)}>
-                    ◀
-                  </button>
-                  <button type="button" disabled={!hasAdjustTarget} onClick={() => rotateBy(ADJUST_ROTATE_STEP_RADIANS)}>
-                    ▶
-                  </button>
+                  <span>位置(前後)</span>
+                  <div className={styles.adjustButtons}>
+                    <button type="button" onClick={() => moveBy(-ADJUST_MOVE_STEP_METERS, 0)}>
+                      手前へ
+                    </button>
+                    <button type="button" onClick={() => moveBy(ADJUST_MOVE_STEP_METERS, 0)}>
+                      奥へ
+                    </button>
+                  </div>
+
+                  <span>位置(左右)</span>
+                  <div className={styles.adjustButtons}>
+                    <button type="button" onClick={() => moveBy(0, -ADJUST_MOVE_STEP_METERS)}>
+                      左へ
+                    </button>
+                    <button type="button" onClick={() => moveBy(0, ADJUST_MOVE_STEP_METERS)}>
+                      右へ
+                    </button>
+                  </div>
+
+                  <span>高さ</span>
+                  <div className={styles.adjustButtons}>
+                    <button
+                      type="button"
+                      disabled={!selectedId}
+                      onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}
+                    >
+                      －
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedId}
+                      onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}
+                    >
+                      ＋
+                    </button>
+                  </div>
+
+                  <span>大きさ</span>
+                  <div className={styles.adjustButtons}>
+                    <button type="button" disabled={!selectedId} onClick={() => scaleBy(1 / ADJUST_SCALE_STEP_RATIO)}>
+                      －
+                    </button>
+                    <button type="button" disabled={!selectedId} onClick={() => scaleBy(ADJUST_SCALE_STEP_RATIO)}>
+                      ＋
+                    </button>
+                  </div>
                 </div>
-
-                <span>位置(前後)</span>
-                <div className={styles.adjustButtons}>
-                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(-ADJUST_MOVE_STEP_METERS, 0)}>
-                    手前へ
-                  </button>
-                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(ADJUST_MOVE_STEP_METERS, 0)}>
-                    奥へ
-                  </button>
-                </div>
-
-                <span>位置(左右)</span>
-                <div className={styles.adjustButtons}>
-                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(0, -ADJUST_MOVE_STEP_METERS)}>
-                    左へ
-                  </button>
-                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(0, ADJUST_MOVE_STEP_METERS)}>
-                    右へ
-                  </button>
-                </div>
-
-                <span>高さ</span>
-                <div className={styles.adjustButtons}>
-                  <button
-                    type="button"
-                    disabled={applyToAll || !selectedId}
-                    onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}
-                  >
-                    －
-                  </button>
-                  <button
-                    type="button"
-                    disabled={applyToAll || !selectedId}
-                    onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}
-                  >
-                    ＋
-                  </button>
-                </div>
-              </div>
-
-              {currentAdjustment && (
-                <p className={styles.adjustPanelHint}>
-                  現在の補正: 東西 {currentAdjustment.east.toFixed(1)}m ・ 南北 {currentAdjustment.north.toFixed(1)}m
-                  {currentAdjustment.up !== null && ` ・ 高さ ${currentAdjustment.up.toFixed(1)}m`}
-                  {" ・ 回転 "}
-                  {Math.round((currentAdjustment.yaw * 180) / Math.PI)}度
-                </p>
               )}
-
-              <div className={styles.adjustButtons}>
-                <button type="button" disabled={!hasAdjustTarget} onClick={resetCurrentTarget}>
-                  {applyToAll ? "全体の補正をリセット" : "選択中をリセット"}
-                </button>
-                <button type="button" onClick={resetAllAdjustments}>
-                  すべてリセット
-                </button>
-              </div>
             </div>
           )}
 
