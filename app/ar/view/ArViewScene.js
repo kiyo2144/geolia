@@ -1,6 +1,6 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { AnimatedGifPlaneObject } from "../_shared/components/AnimatedGifPlaneObject";
@@ -125,15 +125,96 @@ function SmoothedPositionGroup({ target, children }) {
   return <group ref={groupRef}>{children}</group>;
 }
 
+// 調整モードで、タップした位置に最も近いコンテンツを選ぶ際の、画面上の許容距離(px)
+const PICK_RADIUS_PX = 100;
+const SELECTION_RING_COLOR = "#4da6ff";
+const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0 };
+
+/** 調整モードで選択中のコンテンツの周りに表示する輪（深度テストなしで常に手前に見せる） */
+function SelectionRing() {
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={998}>
+      <ringGeometry args={[0.55, 0.62, 48]} />
+      <meshBasicMaterial
+        color={SELECTION_RING_COLOR}
+        transparent
+        opacity={0.9}
+        depthTest={false}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+/**
+ * 画面上のタップ位置から、最も近い詳細表示のコンテンツを選ぶ。
+ * 点群・Splat・VRM・HTMLなど種別を問わず選べるよう、レイキャストではなく
+ * 各コンテンツの基準点を画面座標へ投影した距離で判定する。
+ * pickRequestRef に {x, y}（clientX/clientY）が入っていたら1フレームで処理して消費する。
+ */
+function PlacementPicker({ groupsRef, pickRequestRef, onPick }) {
+  const camera = useThree((state) => state.camera);
+  const gl = useThree((state) => state.gl);
+
+  useFrame(() => {
+    const request = pickRequestRef?.current;
+    if (!request) return;
+    pickRequestRef.current = null;
+
+    const rect = gl.domElement.getBoundingClientRect();
+    const pointerX = request.x - rect.left;
+    const pointerY = request.y - rect.top;
+
+    const worldPosition = new THREE.Vector3();
+    let bestId = null;
+    let bestDistance = PICK_RADIUS_PX;
+    for (const [id, object] of groupsRef.current) {
+      object.getWorldPosition(worldPosition);
+      worldPosition.project(camera);
+      // カメラの後ろ・遠方クリップ面の外は対象外
+      if (worldPosition.z < -1 || worldPosition.z > 1) continue;
+      const screenX = ((worldPosition.x + 1) / 2) * rect.width;
+      const screenY = ((1 - worldPosition.y) / 2) * rect.height;
+      const distance = Math.hypot(screenX - pointerX, screenY - pointerY);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestId = id;
+      }
+    }
+    if (bestId !== null) onPick?.(bestId);
+  });
+
+  return null;
+}
+
 /**
  * 現在地周辺の複数のAR配置を同時に表示するシーン。
  * tierが'detail'のものは実データを、'simple'のものはラベルのみを表示する
  * （要件定義 docs/requirements.md 4.2.1章のLOD方式）。
+ *
+ * adjustments: 画面を開いている間だけの見た目上の位置・角度の補正（DBには保存しない）。
+ *   { byId: { [id]: { east, north, up, yaw } }, global: { east, north, yaw } }
+ *   いずれも「ユーザーの現在地を原点としたワールド固定」の値で、歩いても画面に張り付かない。
+ *   global は全コンテンツをまとめて、現在地を中心に yaw だけ回してから east/north へ動かす
+ *   （コンパスのズレのように全体に共通して出る誤差の補正用）。
  */
-export function ArViewScene({ orientation, placements, getPublicUrl, showDebugInfo = false }) {
+export function ArViewScene({
+  orientation,
+  placements,
+  getPublicUrl,
+  showDebugInfo = false,
+  adjustments = null,
+  selectedId = null,
+  isAdjustMode = false,
+  pickRequestRef = null,
+  onPick = null,
+}) {
   const hasSplat = placements.some(
     (p) => p.tier === "detail" && p.asset_type === "gaussian_splat",
   );
+  const groupsRef = useRef(new Map());
+  const globalAdjustment = adjustments?.global ?? { east: 0, north: 0, yaw: 0 };
 
   return (
     <Canvas
@@ -148,32 +229,60 @@ export function ArViewScene({ orientation, placements, getPublicUrl, showDebugIn
       <OrientedCamera orientation={orientation} />
       <ambientLight intensity={1.2} />
       {hasSplat && <SparkSetup />}
+      {isAdjustMode && (
+        <PlacementPicker groupsRef={groupsRef} pickRequestRef={pickRequestRef} onPick={onPick} />
+      )}
 
-      {placements.map((placement) => (
-        <SmoothedPositionGroup
-          key={placement.id}
-          target={[placement.localX, placement.localY, placement.localZ]}
-        >
-          {placement.tier === "detail" ? (
-            <>
-              <Suspense fallback={null}>
-                <DetailedPlacement
-                  placement={placement}
-                  url={getPublicUrl(placement.storage_path)}
-                  motionAssetUrl={
-                    placement.motion_storage_path
-                      ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
-                      : null
-                  }
-                />
-              </Suspense>
-              {showDebugInfo && <DebugDistanceLabel distanceMeters={placement.distance_meters} />}
-            </>
-          ) : (
-            <PlacementLabelSprite label={placement.label} distanceMeters={placement.distance_meters} />
-          )}
-        </SmoothedPositionGroup>
-      ))}
+      {/* 全体補正: 現在地(原点)を中心に回してから平行移動する（localX=東, localZ=-北） */}
+      <group
+        position={[globalAdjustment.east, 0, -globalAdjustment.north]}
+        rotation={[0, globalAdjustment.yaw, 0]}
+      >
+        {placements.map((placement) => {
+          const adjustment = adjustments?.byId?.[placement.id] ?? ZERO_INDIVIDUAL_ADJUSTMENT;
+          const isDetail = placement.tier === "detail";
+          return (
+            <SmoothedPositionGroup
+              key={placement.id}
+              target={[placement.localX, placement.localY, placement.localZ]}
+            >
+              {/* 個別補正: GPS位置への追従(上の補間)とは独立に、即座に反映する */}
+              <group
+                ref={
+                  isDetail
+                    ? (object) => {
+                        if (object) groupsRef.current.set(placement.id, object);
+                        else groupsRef.current.delete(placement.id);
+                      }
+                    : undefined
+                }
+                position={[adjustment.east, adjustment.up, -adjustment.north]}
+                rotation={[0, adjustment.yaw, 0]}
+              >
+                {isDetail ? (
+                  <>
+                    <Suspense fallback={null}>
+                      <DetailedPlacement
+                        placement={placement}
+                        url={getPublicUrl(placement.storage_path)}
+                        motionAssetUrl={
+                          placement.motion_storage_path
+                            ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
+                            : null
+                        }
+                      />
+                    </Suspense>
+                    {showDebugInfo && <DebugDistanceLabel distanceMeters={placement.distance_meters} />}
+                    {isAdjustMode && selectedId === placement.id && <SelectionRing />}
+                  </>
+                ) : (
+                  <PlacementLabelSprite label={placement.label} distanceMeters={placement.distance_meters} />
+                )}
+              </group>
+            </SmoothedPositionGroup>
+          );
+        })}
+      </group>
     </Canvas>
   );
 }

@@ -6,6 +6,7 @@ import { CameraBackground } from "../_shared/components/CameraBackground";
 import { CompassHint } from "../_shared/components/CompassHint";
 import { useCameraStream } from "../_shared/hooks/useCameraStream";
 import { useDeviceOrientation } from "../_shared/hooks/useDeviceOrientation";
+import { useArViewAdjustGestures } from "../_shared/hooks/useArViewAdjustGestures";
 import { useGeolocation } from "../_shared/hooks/useGeolocation";
 import {
   bearingDegrees,
@@ -44,6 +45,15 @@ const NEAR_DISTANCE_METERS = 30;
 // 体験上重要なため、既定よりも追従を速くする（実機検証: 既定値だと徒歩中の平滑化の
 // 遅れが数m相当になり、AR配置が自分に付いてくるように見えてしまっていた）。
 const AR_VIEW_POSITION_EMA_ALPHA = 0.6;
+
+// 調整モード（画面を開いている間だけの見た目上の位置・角度の補正）の操作量
+const ADJUST_ROTATE_RADIANS_PER_PIXEL = 0.012; // 1本指の横ドラッグ（AR設置画面と同じ）
+const ADJUST_MOVE_METERS_PER_PIXEL = 0.004; // 2本指ドラッグ
+const ADJUST_ROTATE_STEP_RADIANS = Math.PI / 12; // ボタン1回あたり15度
+const ADJUST_MOVE_STEP_METERS = 0.5; // ボタン1回あたり
+const ADJUST_HEIGHT_STEP_METERS = 0.2; // ボタン1回あたり
+const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0 };
+const ZERO_GLOBAL_ADJUSTMENT = { east: 0, north: 0, yaw: 0 };
 
 // 自己位置の標高タイルサンプラーを取得する範囲（度）。AR設置画面と違い歩き回るため、
 // 少し動くたびに取得し直さずに済むよう広めに取っている（約1km四方）。
@@ -250,6 +260,104 @@ export function ArViewView() {
     [supabase],
   );
 
+  // --- 調整モード: 画面を開いている間だけの、見た目上の位置・角度の補正 ---
+  // DBには保存せず、画面を閉じる・リロードすると破棄される（他のユーザーにも影響しない）。
+  // 値は「現在地を原点としたワールド固定」の東西・南北・高さ・水平回転で持つ。
+  const [isAdjustMode, setIsAdjustMode] = useState(false);
+  // trueの間は、選択中の個別コンテンツではなく全コンテンツへまとめて適用する
+  const [applyToAll, setApplyToAll] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [individualAdjustments, setIndividualAdjustments] = useState({});
+  const [globalAdjustment, setGlobalAdjustment] = useState(ZERO_GLOBAL_ADJUSTMENT);
+  const pickRequestRef = useRef(null);
+  const deviceHeadingRef = useRef(null);
+  useEffect(() => {
+    deviceHeadingRef.current = deviceHeading;
+  }, [deviceHeading]);
+
+  const adjustments = useMemo(
+    () => ({ byId: individualAdjustments, global: globalAdjustment }),
+    [individualAdjustments, globalAdjustment],
+  );
+
+  const updateIndividual = useCallback((id, updater) => {
+    setIndividualAdjustments((prev) => ({
+      ...prev,
+      [id]: updater(prev[id] ?? ZERO_INDIVIDUAL_ADJUSTMENT),
+    }));
+  }, []);
+
+  const rotateBy = useCallback(
+    (radians) => {
+      if (applyToAll) {
+        setGlobalAdjustment((prev) => ({ ...prev, yaw: prev.yaw + radians }));
+      } else if (selectedId) {
+        updateIndividual(selectedId, (a) => ({ ...a, yaw: a.yaw + radians }));
+      }
+    },
+    [applyToAll, selectedId, updateIndividual],
+  );
+
+  // 画面の向き（コンパス方位）を基準に、前後(forward)・左右(right)へメートル単位で動かす
+  const moveBy = useCallback(
+    (forwardMeters, rightMeters) => {
+      const headingRadians = ((deviceHeadingRef.current ?? 0) * Math.PI) / 180;
+      const east = Math.sin(headingRadians) * forwardMeters + Math.cos(headingRadians) * rightMeters;
+      const north = Math.cos(headingRadians) * forwardMeters - Math.sin(headingRadians) * rightMeters;
+      if (applyToAll) {
+        setGlobalAdjustment((prev) => ({ ...prev, east: prev.east + east, north: prev.north + north }));
+      } else if (selectedId) {
+        updateIndividual(selectedId, (a) => ({ ...a, east: a.east + east, north: a.north + north }));
+      }
+    },
+    [applyToAll, selectedId, updateIndividual],
+  );
+
+  // 高さは個別のコンテンツにのみ適用する（今の表示高さからの増減）
+  const changeHeightBy = useCallback(
+    (meters) => {
+      if (applyToAll || !selectedId) return;
+      updateIndividual(selectedId, (a) => ({ ...a, up: a.up + meters }));
+    },
+    [applyToAll, selectedId, updateIndividual],
+  );
+
+  const resetCurrentTarget = useCallback(() => {
+    if (applyToAll) {
+      setGlobalAdjustment(ZERO_GLOBAL_ADJUSTMENT);
+    } else if (selectedId) {
+      setIndividualAdjustments((prev) => {
+        const next = { ...prev };
+        delete next[selectedId];
+        return next;
+      });
+    }
+  }, [applyToAll, selectedId]);
+
+  const resetAllAdjustments = useCallback(() => {
+    setIndividualAdjustments({});
+    setGlobalAdjustment(ZERO_GLOBAL_ADJUSTMENT);
+  }, []);
+
+  const adjustSurfaceRef = useArViewAdjustGestures({
+    enabled: isAdjustMode,
+    onTap: (x, y) => {
+      pickRequestRef.current = { x, y };
+    },
+    onRotateByDelta: (deltaPixels) => rotateBy(deltaPixels * ADJUST_ROTATE_RADIANS_PER_PIXEL),
+    onMoveByDelta: (deltaX, deltaY) =>
+      moveBy(-deltaY * ADJUST_MOVE_METERS_PER_PIXEL, deltaX * ADJUST_MOVE_METERS_PER_PIXEL),
+  });
+
+  const detailPlacements = placementsWithGeometry.filter((p) => p.tier === "detail");
+  const selectedPlacement = placementsWithGeometry.find((p) => p.id === selectedId) ?? null;
+  const currentAdjustment = applyToAll
+    ? { ...globalAdjustment, up: null }
+    : selectedId
+      ? (individualAdjustments[selectedId] ?? ZERO_INDIVIDUAL_ADJUSTMENT)
+      : null;
+  const hasAdjustTarget = applyToAll || !!selectedId;
+
   return (
     <div className={styles.wrapper}>
       {/* isActiveに関わらず常にマウントしておく。カメラ開始時にvideo要素が
@@ -263,7 +371,139 @@ export function ArViewView() {
             placements={placementsWithGeometry}
             getPublicUrl={getPublicUrl}
             showDebugInfo={SHOW_DEBUG_INFO}
+            adjustments={adjustments}
+            selectedId={selectedId}
+            isAdjustMode={isAdjustMode}
+            pickRequestRef={pickRequestRef}
+            onPick={setSelectedId}
           />
+
+          {isAdjustMode && <div ref={adjustSurfaceRef} className={styles.adjustSurface} />}
+
+          <button
+            type="button"
+            className={isAdjustMode ? styles.adjustToggleActive : styles.adjustToggle}
+            onClick={() => setIsAdjustMode((current) => !current)}
+          >
+            調整モード: {isAdjustMode ? "ON" : "OFF"}
+          </button>
+
+          {isAdjustMode && (
+            <div className={styles.adjustPanel}>
+              <p className={styles.adjustPanelHint}>
+                画面を開いている間だけの見た目の補正です（保存されません）。
+                タップで選択 ・ 1本指スワイプで回転 ・ 2本指ドラッグで移動（PCはShift+ドラッグ）
+              </p>
+
+              <div className={styles.adjustTargetList}>
+                {detailPlacements.length === 0 && (
+                  <span className={styles.adjustPanelHint}>調整できる表示中のコンテンツがありません</span>
+                )}
+                {detailPlacements.map((placement) => (
+                  <button
+                    key={placement.id}
+                    type="button"
+                    className={
+                      !applyToAll && placement.id === selectedId
+                        ? styles.adjustTargetButtonActive
+                        : styles.adjustTargetButton
+                    }
+                    onClick={() => {
+                      setApplyToAll(false);
+                      setSelectedId(placement.id);
+                    }}
+                  >
+                    {placement.label || "(名前なし)"}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                className={applyToAll ? styles.adjustTargetButtonActive : styles.adjustTargetButton}
+                onClick={() => setApplyToAll((current) => !current)}
+              >
+                全体に適用: {applyToAll ? "ON" : "OFF"}
+              </button>
+
+              <p className={styles.adjustPanelHint}>
+                操作対象:{" "}
+                {applyToAll
+                  ? "全てのコンテンツ（現在地を中心にまとめて回転・移動）"
+                  : selectedPlacement
+                    ? selectedPlacement.label
+                    : "未選択（コンテンツをタップするか、上の一覧から選択）"}
+              </p>
+
+              <div className={styles.adjustGrid}>
+                <span>回転</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" disabled={!hasAdjustTarget} onClick={() => rotateBy(-ADJUST_ROTATE_STEP_RADIANS)}>
+                    ◀
+                  </button>
+                  <button type="button" disabled={!hasAdjustTarget} onClick={() => rotateBy(ADJUST_ROTATE_STEP_RADIANS)}>
+                    ▶
+                  </button>
+                </div>
+
+                <span>位置(前後)</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(-ADJUST_MOVE_STEP_METERS, 0)}>
+                    手前へ
+                  </button>
+                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(ADJUST_MOVE_STEP_METERS, 0)}>
+                    奥へ
+                  </button>
+                </div>
+
+                <span>位置(左右)</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(0, -ADJUST_MOVE_STEP_METERS)}>
+                    左へ
+                  </button>
+                  <button type="button" disabled={!hasAdjustTarget} onClick={() => moveBy(0, ADJUST_MOVE_STEP_METERS)}>
+                    右へ
+                  </button>
+                </div>
+
+                <span>高さ</span>
+                <div className={styles.adjustButtons}>
+                  <button
+                    type="button"
+                    disabled={applyToAll || !selectedId}
+                    onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}
+                  >
+                    －
+                  </button>
+                  <button
+                    type="button"
+                    disabled={applyToAll || !selectedId}
+                    onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
+
+              {currentAdjustment && (
+                <p className={styles.adjustPanelHint}>
+                  現在の補正: 東西 {currentAdjustment.east.toFixed(1)}m ・ 南北 {currentAdjustment.north.toFixed(1)}m
+                  {currentAdjustment.up !== null && ` ・ 高さ ${currentAdjustment.up.toFixed(1)}m`}
+                  {" ・ 回転 "}
+                  {Math.round((currentAdjustment.yaw * 180) / Math.PI)}度
+                </p>
+              )}
+
+              <div className={styles.adjustButtons}>
+                <button type="button" disabled={!hasAdjustTarget} onClick={resetCurrentTarget}>
+                  {applyToAll ? "全体の補正をリセット" : "選択中をリセット"}
+                </button>
+                <button type="button" onClick={resetAllAdjustments}>
+                  すべてリセット
+                </button>
+              </div>
+            </div>
+          )}
 
           <RadarMinimap
             heading={deviceHeading ?? 0}
