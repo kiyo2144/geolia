@@ -3,6 +3,7 @@
 import { useFrame } from "@react-three/fiber";
 import { Suspense, useRef } from "react";
 import { AnimatedGifPlaneObject } from "../ar/_shared/components/AnimatedGifPlaneObject";
+import { HtmlPlaneObject } from "../ar/_shared/components/HtmlPlaneObject";
 import { ImagePlaneObject } from "../ar/_shared/components/ImagePlaneObject";
 import { PointCloudObject } from "../ar/_shared/components/PointCloudObject";
 import { SplatObject } from "../ar/_shared/components/SplatObject";
@@ -10,7 +11,7 @@ import { VrmObject } from "../ar/_shared/components/VrmObject";
 import { PLACEMENT_AHEAD_METERS } from "./useDesktopArPlacement";
 import { isPlacementOccluded } from "./occlusion";
 
-const BILLBOARD_FORMATS = new Set(["image", "gif"]);
+const BILLBOARD_FORMATS = new Set(["image", "gif", "html"]);
 const GHOST_OPACITY = 0.3;
 const GHOST_RENDER_ORDER = 999;
 
@@ -53,6 +54,7 @@ function ObjectByFormat({ dataFormat, dataUrl, splatFileType, decorationPresetKe
       <AnimatedGifPlaneObject url={dataUrl} decorationPresetKey={decorationPresetKey} imageEffectKey={imageEffectKey} />
     );
   if (dataFormat === "vrm") return <VrmObject url={dataUrl} motionPresetKey="idle" motionAssetUrl={null} />;
+  if (dataFormat === "html") return <HtmlPlaneObject url={dataUrl} />;
   return null;
 }
 

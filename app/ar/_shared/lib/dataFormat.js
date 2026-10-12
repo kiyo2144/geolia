@@ -1,9 +1,10 @@
-// AR配置データ（点群・Gaussian Splat・静止画・GIF・VRM）のファイル形式判定・
+// AR配置データ（点群・Gaussian Splat・静止画・GIF・VRM・HTML）のファイル形式判定・
 // サイズ上限まわりの共通ロジック。カメラ経由のAR設置(ar/new)と、
 // カメラを使わないデスクトップ設置(一人称視点)の両方から利用する。
 
 const SPLAT_EXTENSIONS = ["spz", "splat", "ksplat", "sog"];
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
+const HTML_EXTENSIONS = ["html", "htm"];
 
 // 対応データ種別ごとのファイルサイズ上限（要件定義 docs/requirements.md 4.1.4章）
 export const FILE_SIZE_LIMITS_BYTES = {
@@ -12,6 +13,7 @@ export const FILE_SIZE_LIMITS_BYTES = {
   image: 20 * 1024 * 1024,
   gif: 20 * 1024 * 1024,
   vrm: 50 * 1024 * 1024,
+  html: 5 * 1024 * 1024,
 };
 export const FILE_SIZE_LIMIT_LABELS = {
   ply: "100MB",
@@ -19,6 +21,7 @@ export const FILE_SIZE_LIMIT_LABELS = {
   image: "20MB",
   gif: "20MB",
   vrm: "50MB",
+  html: "5MB",
 };
 
 export function getFileFormat(file) {
@@ -27,7 +30,7 @@ export function getFileFormat(file) {
   return match ? match[1] : null;
 }
 
-// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIF・VRMのどれとして読むかを判定する。
+// 拡張子から、点群(PLY)・Gaussian Splat・静止画・GIF・VRM・HTMLのどれとして読むかを判定する。
 // iOSの「ファイル」アプリでは、拡張子だけの独自フォーマット（.spz等）が選択できない
 // （グレーアウトする）ことがあるため、accept属性を汎用バイナリにも広げて選択自体は
 // できるようにしている。その分、ここで対応拡張子かどうかを厳密にチェックする。
@@ -39,6 +42,7 @@ export function getDataFormat(file) {
   if (format === "gif") return "gif";
   if (format === "vrm") return "vrm";
   if (IMAGE_EXTENSIONS.includes(format)) return "image";
+  if (HTML_EXTENSIONS.includes(format)) return "html";
   return null;
 }
 
@@ -69,5 +73,6 @@ export function getAssetType(dataFormat) {
   if (dataFormat === "splat") return "gaussian_splat";
   if (dataFormat === "image" || dataFormat === "gif") return "image";
   if (dataFormat === "vrm") return "vrm";
+  if (dataFormat === "html") return "html";
   return "point_cloud";
 }

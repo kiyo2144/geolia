@@ -18,6 +18,7 @@ function formatDateTime(isoString) {
 }
 
 function assetTypeLabel(assetType) {
+  if (assetType === "html") return "HTML";
   return assetType === "gaussian_splat" ? "Gaussian Splat" : "点群";
 }
 

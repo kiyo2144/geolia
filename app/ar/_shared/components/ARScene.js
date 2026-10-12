@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { latLngToLocalMeters } from "../../../_shared/lib/geoMath";
 import { AnimatedGifPlaneObject } from "./AnimatedGifPlaneObject";
 import { DemoPointCloud } from "./DemoPointCloud";
+import { HtmlPlaneObject } from "./HtmlPlaneObject";
 import { ImagePlaneObject } from "./ImagePlaneObject";
 import { OrientedCamera } from "./OrientedCamera";
 import { PointCloudObject } from "./PointCloudObject";
@@ -229,6 +230,7 @@ export function ARScene({
       {dataUrl && dataFormat === "vrm" && (
         <VrmObject url={dataUrl} motionPresetKey={motionPresetKey} motionAssetUrl={motionAssetUrl} />
       )}
+      {dataUrl && dataFormat === "html" && <HtmlPlaneObject url={dataUrl} />}
       {!dataUrl && <DemoPointCloud />}
     </>
   );

@@ -24,7 +24,7 @@ const MIN_SCALE = 0.05;
 const MAX_SCALE = 50;
 // このフォーマットは「正面から見る」ものなので、位置決め中は常にプレイヤーの方を向かせる
 // （向いている方向によって裏側が見えて上下逆に見える、といった見え方のばらつきを防ぐ）
-const BILLBOARD_FORMATS = new Set(["image", "gif"]);
+const BILLBOARD_FORMATS = new Set(["image", "gif", "html"]);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 

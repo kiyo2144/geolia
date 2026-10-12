@@ -11,6 +11,7 @@ function assetTypeLabel(assetType) {
   if (assetType === "vrm") return "VRM";
   if (assetType === "image") return "画像";
   if (assetType === "gif") return "GIF";
+  if (assetType === "html") return "HTML";
   return "点群";
 }
 

@@ -537,26 +537,32 @@ export function ArNewView() {
           <h2>3Dデータ・メディアの配置</h2>
           <p>
             点群（.ply）、Gaussian Splat（.spz / .splat / .ksplat / .sog）、
-            静止画・GIF（.jpg / .png / .webp / .gif）、VRoid Studioデータ（.vrm）
-            から選択してください。設置場所はこのあとカメラを見ながら決めます。
+            静止画・GIF（.jpg / .png / .webp / .gif）、VRoid Studioデータ（.vrm）、
+            HTML（.html）から選択してください。設置場所はこのあとカメラを見ながら決めます。
             ファイルを選択しない場合はデモ用の点群で動作確認できます。
           </p>
 
           <label className={styles.field}>
-            データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif / .vrm)
+            データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif / .vrm / .html)
             <input
               type="file"
               // iOSの「ファイル」アプリは、.spz等の独自拡張子だけを指定すると
               // ファイルをグレーアウトして選択できないことがあるため、
               // 汎用バイナリのMIMEタイプ（application/octet-stream）も加えて
               // 選択自体は常にできるようにしている（実際の対応判定はJS側で行う）。
-              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm,application/octet-stream"
+              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm,.html,.htm,application/octet-stream"
               onChange={handleFileChange}
             />
           </label>
 
           {fileError && <p className={styles.error}>{fileError}</p>}
           {dataFile && <p className={styles.hint}>選択中: {dataFile.name}</p>}
+          {dataFormat === "html" && (
+            <p className={styles.hint}>
+              HTMLは、JavaScript・CSS・画像をファイル内に含めた単一ファイルのみ表示できます。
+              外部ファイルの読み込みや外部との通信は行われません（サンドボックス内で動作します）。
+            </p>
+          )}
 
           {(dataFormat === "image" || dataFormat === "gif") && (
             <div className={styles.field}>

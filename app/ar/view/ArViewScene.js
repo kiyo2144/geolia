@@ -4,6 +4,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { AnimatedGifPlaneObject } from "../_shared/components/AnimatedGifPlaneObject";
+import { HtmlPlaneObject } from "../_shared/components/HtmlPlaneObject";
 import { ImagePlaneObject } from "../_shared/components/ImagePlaneObject";
 import { OrientedCamera } from "../_shared/components/OrientedCamera";
 import { PlacementLabelSprite } from "../_shared/components/PlacementLabelSprite";
@@ -47,6 +48,8 @@ export function DetailedPlacement({ placement, url, motionAssetUrl }) {
           motionPresetKey={placement.motion_preset_key}
           motionAssetUrl={motionAssetUrl}
         />
+      ) : placement.asset_type === "html" ? (
+        <HtmlPlaneObject url={url} />
       ) : (
         <PointCloudObject url={url} />
       )}

@@ -74,19 +74,25 @@ export function DesktopArPlacementPanel({ placement }) {
       {step === "select" && (
         <div className={styles.body}>
           <p className={styles.hint}>
-            点群（.ply）、Gaussian Splat（.spz/.splat/.ksplat/.sog）、静止画・GIF、VRM（.vrm）
-            から選択してください。
+            点群（.ply）、Gaussian Splat（.spz/.splat/.ksplat/.sog）、静止画・GIF、VRM（.vrm）、
+            HTML（.html）から選択してください。
           </p>
           <label className={styles.fileLabel}>
             ファイルを選択
             <input
               type="file"
-              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm"
+              accept=".ply,.spz,.splat,.ksplat,.sog,.jpg,.jpeg,.png,.webp,.gif,.vrm,.html,.htm"
               onChange={handleFileChange}
             />
           </label>
           {fileError && <p className={styles.error}>{fileError}</p>}
           {dataFile && <p className={styles.hint}>選択中: {dataFile.name}</p>}
+          {dataFormat === "html" && (
+            <p className={styles.hint}>
+              HTMLは、JavaScript・CSS・画像をファイル内に含めた単一ファイルのみ表示できます。
+              外部ファイルの読み込み・外部通信は行われません。
+            </p>
+          )}
 
           {isImageLike && (
             <>
