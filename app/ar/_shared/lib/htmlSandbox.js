@@ -1,7 +1,7 @@
 // アップロードされたHTMLファイルをAR空間内に表示する際の、サンドボックス化まわりの共通ロジック。
 // 投稿者のスクリプトがそのまま他のユーザーの端末で実行されるため、iframeのsandbox属性
 // （allow-same-originを付けない＝アプリのCookie・ストレージ・DOMに触れない）と、
-// 外部通信を全て禁止するCSPの二重で閉じ込める。
+// 外部通信を原則禁止するCSP（許可するのは下記の公開CDNのみ）の二重で閉じ込める。
 
 // 表示用iframeの内部サイズ(px)。AR空間では画像平面と同じ横幅(HTML_PLANE_WIDTH_METERS)に
 // 合わせて縮小して表示する（スケールはHtmlPlaneObject側で掛ける）。
@@ -9,21 +9,63 @@ export const HTML_FRAME_WIDTH_PX = 1024;
 export const HTML_FRAME_HEIGHT_PX = 768;
 export const HTML_PLANE_WIDTH_METERS = 1;
 
-// 外部への通信・外部リソースの読み込みを一切許可しない。インラインのscript/styleと、
-// data:/blob:の画像・フォント・メディアだけを許可する（単一ファイルで完結するHTML向け）。
+// Three.jsなどのライブラリを読み込むHTMLを動かすため、読み込みだけを許可する公開CDN。
+// 任意のサーバーへの通信（データの持ち出し）は許可しない。ここに載せたホストは
+// スクリプト・スタイル・画像・フォント・fetch(モデル/テクスチャ)の取得に使える。
+const TRUSTED_CDN_HOSTS = [
+  "https://cdnjs.cloudflare.com",
+  "https://cdn.jsdelivr.net",
+  "https://unpkg.com",
+  "https://esm.sh",
+  // three.js公式のビルド・サンプル用テクスチャ
+  "https://threejs.org",
+];
+const GOOGLE_FONTS_STYLE_HOST = "https://fonts.googleapis.com";
+const GOOGLE_FONTS_FILE_HOST = "https://fonts.gstatic.com";
+
 const SANDBOX_CSP = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
-  "font-src data:",
-  "media-src data: blob:",
-  "connect-src 'none'",
+  `script-src 'unsafe-inline' ${TRUSTED_CDN_HOSTS.join(" ")}`,
+  `style-src 'unsafe-inline' ${[GOOGLE_FONTS_STYLE_HOST, ...TRUSTED_CDN_HOSTS].join(" ")}`,
+  `img-src data: blob: ${TRUSTED_CDN_HOSTS.join(" ")}`,
+  `font-src data: ${[GOOGLE_FONTS_FILE_HOST, ...TRUSTED_CDN_HOSTS].join(" ")}`,
+  `media-src data: blob: ${TRUSTED_CDN_HOSTS.join(" ")}`,
+  `connect-src ${TRUSTED_CDN_HOSTS.join(" ")}`,
   "frame-src 'none'",
   "object-src 'none'",
   "form-action 'none'",
   "base-uri 'none'",
 ].join("; ");
+
+// 読み込みがブロックされた・スクリプトエラーが出た場合に、黒い画面のまま原因が分からなく
+// ならないよう、iframe内の左上に小さく理由を表示する。iframeの外（アプリ側）からは
+// sandboxの中身を見られないため、文書の先頭に差し込んで内側で検知する。
+const DIAGNOSTIC_SCRIPT = `
+(function () {
+  var messages = [];
+  var banner = null;
+  function render() {
+    if (!document.documentElement) return;
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.setAttribute("style", "position:fixed;left:0;top:0;z-index:2147483647;max-width:100%;box-sizing:border-box;padding:6px 10px;background:rgba(160,20,20,.88);color:#fff;font:12px/1.5 sans-serif;white-space:pre-wrap;word-break:break-all;pointer-events:none");
+      document.documentElement.appendChild(banner);
+    }
+    banner.textContent = messages.join("\\n");
+  }
+  function add(text) {
+    if (messages.indexOf(text) !== -1 || messages.length >= 3) return;
+    messages.push(text);
+    render();
+  }
+  document.addEventListener("securitypolicyviolation", function (event) {
+    add("読み込みがブロックされました: " + (event.blockedURI || event.violatedDirective));
+  });
+  window.addEventListener("error", function (event) {
+    add("スクリプトエラー: " + (event.message || "不明なエラー"));
+  });
+})();
+`;
 
 /**
  * HTMLテキストを、iframeのsrcdocに渡せるサンドボックス用の文書に変換する。
@@ -36,6 +78,11 @@ export function buildSandboxedSrcdoc(htmlText) {
 
   // 外部へ遷移させるrefreshと、相対URLの基準を書き換える<base>は取り除く
   parsed.querySelectorAll("base, meta[http-equiv='refresh' i]").forEach((element) => element.remove());
+
+  // 先頭から順に「CSP → 診断スクリプト → 投稿者の内容」になるよう、後ろから差し込む
+  const diagnostic = parsed.createElement("script");
+  diagnostic.textContent = DIAGNOSTIC_SCRIPT;
+  parsed.head.prepend(diagnostic);
 
   const meta = parsed.createElement("meta");
   meta.setAttribute("http-equiv", "Content-Security-Policy");

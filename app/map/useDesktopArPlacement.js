@@ -68,6 +68,8 @@ export function useDesktopArPlacement({
   // 毎フレーム更新するとReactの再レンダーが多発するため、Canvas側はrefに書き込むだけにして
   // (livePositionRef)、パネル側が一定間隔でポーリングしてlivePositionへ反映する。
   const livePositionRef = useRef(null);
+  // 保存の二重実行を防ぐ（成功後に画面を閉じるまでの間の再タップでも、同じ配置が2件登録されるため）
+  const isSaveLockedRef = useRef(false);
   const [livePosition, setLivePosition] = useState(null);
   useEffect(() => {
     if (!active) return undefined;
@@ -90,6 +92,7 @@ export function useDesktopArPlacement({
   }, [dataUrl]);
 
   const reset = useCallback(() => {
+    isSaveLockedRef.current = false;
     setStep("select");
     setDataFile(null);
     setFileError(null);
@@ -275,6 +278,8 @@ export function useDesktopArPlacement({
       return;
     }
     setLabelError(false);
+    if (isSaveLockedRef.current) return;
+    isSaveLockedRef.current = true;
     setIsSaving(true);
     try {
       await saveArPlacement(supabase, {
@@ -303,6 +308,8 @@ export function useDesktopArPlacement({
     } catch (saveError) {
       console.error("AR配置の保存に失敗しました:", saveError);
       setSaveStatus(`シェアに失敗しました: ${saveError.message ?? "不明なエラー"}`);
+      // 失敗した場合だけ、やり直せるようにロックを外す（成功後は閉じる/リセットまでロックしたまま）
+      isSaveLockedRef.current = false;
     } finally {
       setIsSaving(false);
     }

@@ -149,6 +149,9 @@ export function ArNewView() {
   // 狙い撃ちモードでカメラ正面に表示している地点のローカル座標(east/north)。
   // Canvas内で毎フレーム更新され、「ここに配置」ボタン押下時に読み取る。
   const aimPointRef = useRef({ east: 0, north: 0 });
+  // 保存の二重実行を防ぐ。stateだと再レンダーまで反映が遅れ、素早い連打や、保存成功後に
+  // 画面遷移するまでの間の再タップで同じ配置が2件登録されてしまうため、refで即座に弾く。
+  const isSaveLockedRef = useRef(false);
 
   const dataFormat = useMemo(() => getDataFormat(dataFile), [dataFile]);
   const splatFileType = useMemo(
@@ -259,6 +262,7 @@ export function ArNewView() {
     setMotionFileError(null);
     setPreviewBlob(null);
     setIsSaved(false);
+    isSaveLockedRef.current = false;
   };
 
   const handleMotionFileChange = (event) => {
@@ -283,6 +287,7 @@ export function ArNewView() {
     setMotionFileError(null);
     setMotionFile(file);
     setIsSaved(false);
+    isSaveLockedRef.current = false;
   };
 
   // 位置情報・カメラ・端末の向きの許可要求をまとめて行う（「ARを開始」ボタンからの
@@ -332,6 +337,7 @@ export function ArNewView() {
     setAdjustment(DEFAULT_ADJUSTMENT);
     setArSubMode("fine-tune");
     setIsSaved(false);
+    isSaveLockedRef.current = false;
 
     setGroundElevation(null);
     const margin = ELEVATION_SAMPLER_MARGIN_DEGREES;
@@ -481,6 +487,8 @@ export function ArNewView() {
     }
     setLabelError(false);
 
+    if (isSaveLockedRef.current) return;
+    isSaveLockedRef.current = true;
     setIsSaving(true);
     try {
       await saveArPlacement(supabase, {
@@ -510,6 +518,8 @@ export function ArNewView() {
     } catch (saveError) {
       console.error("AR配置の保存に失敗しました:", saveError);
       setSaveStatus(`シェアに失敗しました: ${saveError.message ?? "不明なエラー"}`);
+      // 失敗した場合だけ、やり直せるようにロックを外す（成功後は画面遷移までロックしたままにする）
+      isSaveLockedRef.current = false;
     } finally {
       setIsSaving(false);
     }
@@ -559,8 +569,8 @@ export function ArNewView() {
           {dataFile && <p className={styles.hint}>選択中: {dataFile.name}</p>}
           {dataFormat === "html" && (
             <p className={styles.hint}>
-              HTMLは、JavaScript・CSS・画像をファイル内に含めた単一ファイルのみ表示できます。
-              外部ファイルの読み込みや外部との通信は行われません（サンドボックス内で動作します）。
+              HTMLは単一ファイルのみ表示できます。外部の読み込みは、主要なCDN（cdnjs・jsDelivr・unpkg・esm.sh・threejs.org・Google Fonts）
+              だけ可能です。それ以外への通信は行われません（サンドボックス内で動作し、画面上の操作はできません）。
             </p>
           )}
 
@@ -879,6 +889,7 @@ export function ArNewView() {
                 onClick={handleSave}
                 disabled={
                   isSaving ||
+                  isSaved ||
                   !dataFile ||
                   !placement ||
                   !label.trim() ||

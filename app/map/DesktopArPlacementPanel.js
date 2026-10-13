@@ -89,8 +89,8 @@ export function DesktopArPlacementPanel({ placement }) {
           {dataFile && <p className={styles.hint}>選択中: {dataFile.name}</p>}
           {dataFormat === "html" && (
             <p className={styles.hint}>
-              HTMLは、JavaScript・CSS・画像をファイル内に含めた単一ファイルのみ表示できます。
-              外部ファイルの読み込み・外部通信は行われません。
+              HTMLは単一ファイルのみ表示できます。外部の読み込みは主要なCDN（cdnjs・jsDelivr・unpkg・
+              esm.sh・threejs.org・Google Fonts）だけ可能で、それ以外への通信は行われません。
             </p>
           )}
 
