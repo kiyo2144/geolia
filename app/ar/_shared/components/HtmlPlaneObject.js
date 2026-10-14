@@ -6,6 +6,7 @@ import { CSS3DObject, CSS3DRenderer } from "three/examples/jsm/renderers/CSS3DRe
 import {
   HTML_FRAME_HEIGHT_PX,
   HTML_FRAME_WIDTH_PX,
+  HTML_MAX_DISPLAY_BYTES,
   HTML_PLANE_WIDTH_METERS,
   buildSandboxedSrcdoc,
 } from "../lib/htmlSandbox";
@@ -65,25 +66,38 @@ export function HtmlPlaneObject({ url }) {
       try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const htmlText = await response.text();
+        const buffer = await response.arrayBuffer();
         if (cancelled) return;
-
-        const iframe = document.createElement("iframe");
-        iframe.setAttribute("sandbox", "allow-scripts");
-        iframe.setAttribute("referrerpolicy", "no-referrer");
-        iframe.style.cssText = [
-          `width:${HTML_FRAME_WIDTH_PX}px`,
-          `height:${HTML_FRAME_HEIGHT_PX}px`,
-          "border:0",
-          "display:block",
-          "background:#fff",
-        ].join(";");
-        iframe.srcdoc = buildSandboxedSrcdoc(htmlText);
+        const byteLength = buffer.byteLength;
 
         const wrapper = document.createElement("div");
         wrapper.style.width = `${HTML_FRAME_WIDTH_PX}px`;
         wrapper.style.height = `${HTML_FRAME_HEIGHT_PX}px`;
-        wrapper.appendChild(iframe);
+
+        if (byteLength > HTML_MAX_DISPLAY_BYTES) {
+          // 重すぎるHTMLを実際に動かすと、端末(特にiPhone)がページごと強制終了されるため、
+          // iframeは作らず、省略した旨だけを表示する。
+          wrapper.style.cssText += ";display:flex;align-items:center;justify-content:center;" +
+            "box-sizing:border-box;padding:32px;background:#161b22;color:#f0f3f7;" +
+            "font:28px/1.6 sans-serif;text-align:center";
+          wrapper.textContent =
+            "このHTMLはファイルサイズが大きいため、ARでの表示を省略しています（約" +
+            (byteLength / (1024 * 1024)).toFixed(1) +
+            "MB）";
+        } else {
+          const iframe = document.createElement("iframe");
+          iframe.setAttribute("sandbox", "allow-scripts");
+          iframe.setAttribute("referrerpolicy", "no-referrer");
+          iframe.style.cssText = [
+            `width:${HTML_FRAME_WIDTH_PX}px`,
+            `height:${HTML_FRAME_HEIGHT_PX}px`,
+            "border:0",
+            "display:block",
+            "background:#fff",
+          ].join(";");
+          iframe.srcdoc = buildSandboxedSrcdoc(new TextDecoder().decode(buffer));
+          wrapper.appendChild(iframe);
+        }
 
         const object = new CSS3DObject(wrapper);
         // CSS3DObjectは既定でpointer-events:autoにするが、表示専用のため操作は受け付けない

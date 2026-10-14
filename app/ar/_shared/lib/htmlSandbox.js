@@ -5,8 +5,12 @@
 
 // 表示用iframeの内部サイズ(px)。AR空間では画像平面と同じ横幅(HTML_PLANE_WIDTH_METERS)に
 // 合わせて縮小して表示する（スケールはHtmlPlaneObject側で掛ける）。
-export const HTML_FRAME_WIDTH_PX = 1024;
-export const HTML_FRAME_HEIGHT_PX = 768;
+// iPhone（画面倍率3倍）では、iframe内のWebGLの描画ピクセル数がこの縦横の9倍になり、
+// 大きいと負荷でページごと強制終了されたため、読める範囲で小さめにしている。
+export const HTML_FRAME_WIDTH_PX = 640;
+export const HTML_FRAME_HEIGHT_PX = 480;
+// これを超えるHTMLは、重くて端末が耐えられないためライブ表示せず、代わりの案内を表示する。
+export const HTML_MAX_DISPLAY_BYTES = 1.5 * 1024 * 1024;
 export const HTML_PLANE_WIDTH_METERS = 1;
 
 // Three.jsなどのライブラリを読み込むHTMLを動かすため、読み込みだけを許可する公開CDN。

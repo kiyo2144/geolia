@@ -40,6 +40,11 @@ const VIEW_EXIT_ANGLE_DEGREES = 75; // 詳細→簡易表示へ切り替わる�
 // 至近距離では、カメラの向きが多少ずれていても実物として見えることが多いため、
 // 角度によらず詳細表示の対象にする（要望により追加）。
 const NEAR_DISTANCE_METERS = 30;
+// HTML（ライブ表示）は、1件ごとにiframe（WebGLを使うものはGPU描画も）が動くため端末への負荷が
+// 非常に大きい。iPhoneで複数を同時に動かすとメモリ・GPU負荷でページごと強制終了される
+// （実機で確認）ため、同時に動かす数を絞る。また「近い」だけでは背後のものまで動かして
+// しまうので、HTMLは正面に見ているもの（視野角の判定）だけをライブ表示にする。
+const MAX_LIVE_HTML_COUNT = 1;
 // 現在地の平滑化係数（EMA）。useGeolocationの既定値(0.25)は地図上のマーカー表示など
 // 向けの穏やかな設定だが、AR閲覧では「歩いた分だけAR配置が近づいて見える」ことが
 // 体験上重要なため、既定よりも追従を速くする（実機検証: 既定値だと徒歩中の平滑化の
@@ -221,6 +226,11 @@ export function ArViewView() {
   // レンダー中に直接stateを更新する」というReact公式の手法
   // （https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes）
   // を使い、Effect経由の非同期な反映によるチラつきの1フレーム遅れを避ける。
+  // 動作が不安定な端末向けの緊急回避用。/ar/view?html=off でHTMLのライブ表示を無効にし、
+  // HTMLの配置も簡易表示（ラベル）にする。
+  const [isLiveHtmlDisabled] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("html") === "off",
+  );
   const [stickySnapshot, setStickySnapshot] = useState({ raw: null, sticky: new Set() });
   let stickyDetailIds = stickySnapshot.sticky;
   if (stickySnapshot.raw !== placementsRaw) {
@@ -228,7 +238,9 @@ export function ArViewView() {
     const next = new Set();
     for (const placement of placementsRaw) {
       const wasSticky = previous.has(placement.id);
-      const isNear = placement.distance_meters <= NEAR_DISTANCE_METERS;
+      // HTMLは近さだけでは詳細表示にせず、視野角に入ったときだけ詳細表示にする
+      const isNear =
+        placement.distance_meters <= NEAR_DISTANCE_METERS && placement.asset_type !== "html";
       const shouldEnter = isNear || placement.angleDiff <= VIEW_ENTER_ANGLE_DEGREES;
       const shouldStay = wasSticky && placement.angleDiff <= VIEW_EXIT_ANGLE_DEGREES;
       if (shouldEnter || shouldStay) next.add(placement.id);
@@ -242,12 +254,18 @@ export function ArViewView() {
   const placementsWithGeometry = useMemo(() => {
     return placementsRaw.reduce((acc, placement) => {
       const inView = stickyDetailIds.has(placement.id);
-      const tier = inView && acc.detailCount < DETAIL_LIMIT ? "detail" : "simple";
+      const isHtml = placement.asset_type === "html";
+      // HTMLは同時にライブ表示できる件数を絞る（近い順なので、近いものが優先される）
+      const canShowDetail = !isHtml || (!isLiveHtmlDisabled && acc.htmlCount < MAX_LIVE_HTML_COUNT);
+      const tier = inView && acc.detailCount < DETAIL_LIMIT && canShowDetail ? "detail" : "simple";
       acc.list.push({ ...placement, inView, tier });
-      if (tier === "detail") acc.detailCount += 1;
+      if (tier === "detail") {
+        acc.detailCount += 1;
+        if (isHtml) acc.htmlCount += 1;
+      }
       return acc;
-    }, { list: [], detailCount: 0 }).list;
-  }, [placementsRaw, stickyDetailIds]);
+    }, { list: [], detailCount: 0, htmlCount: 0 }).list;
+  }, [placementsRaw, stickyDetailIds, isLiveHtmlDisabled]);
 
   // 現在カメラの向きから外れていて画面に映っていない配置のうち、最も近いものへの
   // 方向・距離を常時表示するヒント用のターゲット（視野内なら非表示にする）。
