@@ -42,9 +42,11 @@ const VIEW_EXIT_ANGLE_DEGREES = 75; // 詳細→簡易表示へ切り替わる�
 const NEAR_DISTANCE_METERS = 30;
 // HTML（ライブ表示）は、1件ごとにiframe（WebGLを使うものはGPU描画も）が動くため端末への負荷が
 // 非常に大きい。iPhoneで複数を同時に動かすとメモリ・GPU負荷でページごと強制終了される
-// （実機で確認）ため、同時に動かす数を絞る。また「近い」だけでは背後のものまで動かして
-// しまうので、HTMLは正面に見ているもの（視野角の判定）だけをライブ表示にする。
-const MAX_LIVE_HTML_COUNT = 1;
+// （実機で確認）ため、同時に動かす数を絞る（近い順）。なお、動かす対象を視野角で絞ると、
+// 配置した場所のすぐそばではGPS誤差で方位がずれて視野外と判定され、HTMLが出なくなる
+// （実機で確認）ため、他のコンテンツと同様に「近さ」で判定する。負荷は、iframe内の描画
+// 解像度の固定（lib/htmlSandbox.js）と、この件数の上限で抑える。
+const MAX_LIVE_HTML_COUNT = 2;
 // 現在地の平滑化係数（EMA）。useGeolocationの既定値(0.25)は地図上のマーカー表示など
 // 向けの穏やかな設定だが、AR閲覧では「歩いた分だけAR配置が近づいて見える」ことが
 // 体験上重要なため、既定よりも追従を速くする（実機検証: 既定値だと徒歩中の平滑化の
@@ -238,9 +240,7 @@ export function ArViewView() {
     const next = new Set();
     for (const placement of placementsRaw) {
       const wasSticky = previous.has(placement.id);
-      // HTMLは近さだけでは詳細表示にせず、視野角に入ったときだけ詳細表示にする
-      const isNear =
-        placement.distance_meters <= NEAR_DISTANCE_METERS && placement.asset_type !== "html";
+      const isNear = placement.distance_meters <= NEAR_DISTANCE_METERS;
       const shouldEnter = isNear || placement.angleDiff <= VIEW_ENTER_ANGLE_DEGREES;
       const shouldStay = wasSticky && placement.angleDiff <= VIEW_EXIT_ANGLE_DEGREES;
       if (shouldEnter || shouldStay) next.add(placement.id);
@@ -256,15 +256,24 @@ export function ArViewView() {
       const inView = stickyDetailIds.has(placement.id);
       const isHtml = placement.asset_type === "html";
       // HTMLは同時にライブ表示できる件数を絞る（近い順なので、近いものが優先される）
-      const canShowDetail = !isHtml || (!isLiveHtmlDisabled && acc.htmlCount < MAX_LIVE_HTML_COUNT);
+      // 同じ名前・同じ位置に重複して登録されたHTMLは、重なって見えるだけなので1件だけ動かす
+      const htmlKey = isHtml
+        ? `${placement.label}|${placement.lat.toFixed(5)}|${placement.lng.toFixed(5)}`
+        : null;
+      const canShowDetail =
+        !isHtml ||
+        (!isLiveHtmlDisabled && acc.htmlCount < MAX_LIVE_HTML_COUNT && !acc.htmlKeys.has(htmlKey));
       const tier = inView && acc.detailCount < DETAIL_LIMIT && canShowDetail ? "detail" : "simple";
       acc.list.push({ ...placement, inView, tier });
       if (tier === "detail") {
         acc.detailCount += 1;
-        if (isHtml) acc.htmlCount += 1;
+        if (isHtml) {
+          acc.htmlCount += 1;
+          acc.htmlKeys.add(htmlKey);
+        }
       }
       return acc;
-    }, { list: [], detailCount: 0, htmlCount: 0 }).list;
+    }, { list: [], detailCount: 0, htmlCount: 0, htmlKeys: new Set() }).list;
   }, [placementsRaw, stickyDetailIds, isLiveHtmlDisabled]);
 
   // 現在カメラの向きから外れていて画面に映っていない配置のうち、最も近いものへの
