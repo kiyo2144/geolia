@@ -75,8 +75,7 @@ export function HtmlPlaneObject({ url }) {
         wrapper.style.height = `${HTML_FRAME_HEIGHT_PX}px`;
 
         if (byteLength > HTML_MAX_DISPLAY_BYTES) {
-          // 重すぎるHTMLを実際に動かすと、端末(特にiPhone)がページごと強制終了されるため、
-          // iframeは作らず、省略した旨だけを表示する。
+          // 上限(設置時のサイズ上限)を超える大きなHTMLは、iframeは作らず、省略した旨だけを表示する。
           wrapper.style.cssText += ";display:flex;align-items:center;justify-content:center;" +
             "box-sizing:border-box;padding:32px;background:#161b22;color:#f0f3f7;" +
             "font:28px/1.6 sans-serif;text-align:center";

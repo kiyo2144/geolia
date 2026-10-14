@@ -9,8 +9,12 @@
 // 大きいと負荷でページごと強制終了されたため、読める範囲で小さめにしている。
 export const HTML_FRAME_WIDTH_PX = 640;
 export const HTML_FRAME_HEIGHT_PX = 480;
-// これを超えるHTMLは、重くて端末が耐えられないためライブ表示せず、代わりの案内を表示する。
-export const HTML_MAX_DISPLAY_BYTES = 1.5 * 1024 * 1024;
+// これを超えるHTMLは、ライブ表示せず代わりの案内を表示する。設置時のサイズ上限
+// （dataFormat.jsのhtml: 5MB）に合わせており、通常は超えない（それ以前のデータや
+// 将来の上限変更への安全弁）。実測では、画像を埋め込んだ4MB台の2Dキャンバスのページは
+// 問題なく動く一方、負荷が大きいのはWebGLのシェーダー等の描画解像度だったため、
+// ファイルサイズではなく下記の描画解像度の固定で負荷を抑えている。
+export const HTML_MAX_DISPLAY_BYTES = 5 * 1024 * 1024;
 export const HTML_PLANE_WIDTH_METERS = 1;
 
 // Three.jsなどのライブラリを読み込むHTMLを動かすため、読み込みだけを許可する公開CDN。
@@ -41,10 +45,17 @@ const SANDBOX_CSP = [
   "base-uri 'none'",
 ].join("; ");
 
-// 読み込みがブロックされた・スクリプトエラーが出た場合に、黒い画面のまま原因が分からなく
-// ならないよう、iframe内の左上に小さく理由を表示する。iframeの外（アプリ側）からは
-// sandboxの中身を見られないため、文書の先頭に差し込んで内側で検知する。
+// 文書の先頭に差し込む、iframe内で動くスクリプト。(1)描画解像度の固定と、(2)読み込みが
+// ブロックされた・スクリプトエラーが出た場合に、黒い画面のまま原因が分からなくならない
+// よう、iframe内の左上に小さく理由を表示する。iframeの外（アプリ側）からはsandboxの
+// 中身を見られないため、内側で検知する。
 const DIAGNOSTIC_SCRIPT = `
+// iPhone(画面倍率3倍)ではcanvas/WebGLの描画ピクセル数が縦横の9倍になり、全画面シェーダー等が
+// GPU負荷でページごと強制終了される原因になるため、ページ側が参照するdevicePixelRatioを1に固定する
+// （AR空間内では板が小さく表示されるため、見た目の差はわずか）。
+try {
+  Object.defineProperty(window, "devicePixelRatio", { get: function () { return 1; } });
+} catch (e) {}
 (function () {
   var messages = [];
   var banner = null;
