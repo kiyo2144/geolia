@@ -132,7 +132,7 @@ function SmoothedPositionGroup({ target, children }) {
 const PICK_RADIUS_PX = 100;
 const MAX_APPARENT_RADIUS_PX = 220;
 const SELECTION_RING_COLOR = "#4da6ff";
-const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0, scale: 1 };
+const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0, pitch: 0, scale: 1 };
 const ZERO_GLOBAL_ADJUSTMENT = { east: 0, north: 0, yaw: 0 };
 // 「正面に呼ぶ」で置く距離(m)。コンテンツの大きさ(scale)に比例して離し、画面に収める。
 const FRONT_DISTANCE_PER_SCALE_METERS = 2;
@@ -268,6 +268,7 @@ function AdjustInteractionBridge({
           north: -local.z,
           up: local.y,
           yaw,
+          pitch: 0,
           scale: current.scale,
         });
       }
@@ -296,7 +297,7 @@ function AdjustInteractionBridge({
  * （要件定義 docs/requirements.md 4.2.1章のLOD方式）。
  *
  * adjustments: 画面を開いている間だけの見た目上の位置・角度・大きさの補正（DBには保存しない）。
- *   { byId: { [id]: { east, north, up, yaw, scale } }, global: { east, north, yaw } }
+ *   { byId: { [id]: { east, north, up, yaw, pitch, scale } }, global: { east, north, yaw } }
  *   いずれも「ユーザーの現在地を原点としたワールド固定」の値で、歩いても画面に張り付かない。
  *   global は全コンテンツをまとめて、現在地を中心に yaw だけ回してから east/north へ動かす
  *   （コンパスのズレのように全体に共通して出る誤差の補正用）。
@@ -369,7 +370,8 @@ export function ArViewScene({
               key={placement.id}
               target={[placement.localX, placement.localY, placement.localZ]}
             >
-              {/* 個別補正: GPS位置への追従(上の補間)とは独立に、即座に反映する */}
+              {/* 個別補正: GPS位置への追従(上の補間)とは独立に、即座に反映する。
+                  回転は先に水平(yaw)をかけ、その向きを基準に縦(pitch)へ傾ける（"YXZ"順）。 */}
               <group
                 ref={
                   isDetail
@@ -380,7 +382,7 @@ export function ArViewScene({
                     : undefined
                 }
                 position={[adjustment.east, adjustment.up, -adjustment.north]}
-                rotation={[0, adjustment.yaw, 0]}
+                rotation={new THREE.Euler(adjustment.pitch ?? 0, adjustment.yaw, 0, "YXZ")}
                 scale={adjustment.scale}
               >
                 {isDetail ? (

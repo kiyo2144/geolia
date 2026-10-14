@@ -6,7 +6,11 @@ import { CameraBackground } from "../_shared/components/CameraBackground";
 import { CompassHint } from "../_shared/components/CompassHint";
 import { useCameraStream } from "../_shared/hooks/useCameraStream";
 import { useDeviceOrientation } from "../_shared/hooks/useDeviceOrientation";
-import { useArViewAdjustGestures } from "../_shared/hooks/useArViewAdjustGestures";
+import {
+  HOLD_ARM_MS,
+  HOLD_RESET_MS,
+  useArViewAdjustGestures,
+} from "../_shared/hooks/useArViewAdjustGestures";
 import { useGeolocation } from "../_shared/hooks/useGeolocation";
 import {
   bearingDegrees,
@@ -56,6 +60,11 @@ const AR_VIEW_POSITION_EMA_ALPHA = 0.6;
 // 調整モード（画面を開いている間だけの見た目上の位置・角度・大きさの補正）の操作量
 const ADJUST_ROTATE_RADIANS_PER_PIXEL = 0.012; // 1本指の横ドラッグ（AR設置画面と同じ）
 const ADJUST_MOVE_METERS_PER_PIXEL = 0.004; // 2本指ドラッグ
+const ADJUST_PITCH_RADIANS_PER_PIXEL = 0.008; // 1本指の縦ドラッグ（縦回転）
+const ADJUST_MAX_PITCH_RADIANS = Math.PI / 2; // 縦回転の上限（±90度）
+const ADJUST_HEIGHT_METERS_PER_PIXEL = 0.01; // 長押し→上下ドラッグ（高さ）
+const UNDO_RESET_VISIBLE_MS = 6000; // リセット直後に「元に戻す」を出しておく時間
+const HINT_VISIBLE_MS = 7000; // 操作ヒントを自動で消すまでの時間
 const ADJUST_ROTATE_STEP_RADIANS = Math.PI / 12; // ボタン1回あたり15度
 const ADJUST_MOVE_STEP_METERS = 0.5; // ボタン1回あたり
 const ADJUST_HEIGHT_STEP_METERS = 0.2; // ボタン1回あたり
@@ -63,7 +72,7 @@ const ADJUST_SCALE_STEP_RATIO = 1.15; // ボタン1回あたり
 // 個別の拡大率（元の大きさに対する倍率）の範囲
 const ADJUST_MIN_SCALE = 0.1;
 const ADJUST_MAX_SCALE = 20;
-const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0, scale: 1 };
+const ZERO_INDIVIDUAL_ADJUSTMENT = { east: 0, north: 0, up: 0, yaw: 0, pitch: 0, scale: 1 };
 const ZERO_GLOBAL_ADJUSTMENT = { east: 0, north: 0, yaw: 0 };
 
 
@@ -296,7 +305,8 @@ export function ArViewView() {
   // DBには保存せず、画面を閉じる・リロードすると破棄される（他のユーザーにも影響しない）。
   // 値は「現在地を原点としたワールド固定」の東西・南北・高さ・水平回転・拡大率で持つ。
   // 操作対象は「タップで選んだ1件（個別）」で、何も選んでいない間は「全体」を動かす。
-  const [isAdjustMode, setIsAdjustMode] = useState(false);
+  // 調整モードは、画面を開くたびにONで始める（OFFにしても保存しない）。
+  const [isAdjustMode, setIsAdjustMode] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [isFineAdjustOpen, setIsFineAdjustOpen] = useState(false);
   const [individualAdjustments, setIndividualAdjustments] = useState({});
@@ -308,12 +318,32 @@ export function ArViewView() {
   const reticleRef = useRef(null);
   const deviceHeadingRef = useRef(null);
   const individualAdjustmentsRef = useRef({});
+  const globalAdjustmentRef = useRef(ZERO_GLOBAL_ADJUSTMENT);
+  const frontSavedAdjustmentsRef = useRef({});
+  // 長押しの状態（null | "armed"=高さ調整の待機/リセットのカウント中 | "height"=高さを調整中）
+  const [holdPhase, setHoldPhase] = useState(null);
+  // 直前のリセット前の補正値。リセット直後だけ「元に戻す」で復元できる。
+  const [undoSnapshot, setUndoSnapshot] = useState(null);
+  // 操作ヒントを表示し終えたか（未選択用・選択中用でそれぞれ1回ずつ）
+  const [doneHints, setDoneHints] = useState({ none: false, selected: false });
   useEffect(() => {
     deviceHeadingRef.current = deviceHeading;
   }, [deviceHeading]);
   useEffect(() => {
     individualAdjustmentsRef.current = individualAdjustments;
   }, [individualAdjustments]);
+  useEffect(() => {
+    globalAdjustmentRef.current = globalAdjustment;
+  }, [globalAdjustment]);
+  useEffect(() => {
+    frontSavedAdjustmentsRef.current = frontSavedAdjustments;
+  }, [frontSavedAdjustments]);
+
+  useEffect(() => {
+    if (!undoSnapshot) return undefined;
+    const timer = setTimeout(() => setUndoSnapshot(null), UNDO_RESET_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [undoSnapshot]);
 
   const adjustments = useMemo(
     () => ({ byId: individualAdjustments, global: globalAdjustment }),
@@ -353,7 +383,21 @@ export function ArViewView() {
     [selectedId, updateIndividual],
   );
 
-  // 高さ・大きさは個別のコンテンツにのみ適用する（今の表示からの増減・倍率）
+  // 縦回転・高さ・大きさは個別のコンテンツにのみ適用する（今の表示からの増減・倍率）
+  const pitchBy = useCallback(
+    (radians) => {
+      if (!selectedId) return;
+      updateIndividual(selectedId, (a) => ({
+        ...a,
+        pitch: Math.min(
+          Math.max((a.pitch ?? 0) + radians, -ADJUST_MAX_PITCH_RADIANS),
+          ADJUST_MAX_PITCH_RADIANS,
+        ),
+      }));
+    },
+    [selectedId, updateIndividual],
+  );
+
   const changeHeightBy = useCallback(
     (meters) => {
       if (!selectedId) return;
@@ -375,6 +419,13 @@ export function ArViewView() {
 
   // 選択中は、そのコンテンツの補正だけをリセットする。未選択なら全体と全ての個別補正をリセットする。
   const resetAdjustments = useCallback(() => {
+    // 誤って消した場合に戻せるよう、リセット前の値を控えておく
+    setUndoSnapshot({
+      individual: individualAdjustmentsRef.current,
+      global: globalAdjustmentRef.current,
+      frontSaved: frontSavedAdjustmentsRef.current,
+      label: selectedId ? "選択中をリセットしました" : "全体をリセットしました",
+    });
     if (selectedId) {
       setIndividualAdjustments((prev) => {
         const next = { ...prev };
@@ -392,6 +443,14 @@ export function ArViewView() {
       setGlobalAdjustment(ZERO_GLOBAL_ADJUSTMENT);
     }
   }, [selectedId]);
+
+  const undoReset = useCallback(() => {
+    if (!undoSnapshot) return;
+    setIndividualAdjustments(undoSnapshot.individual);
+    setGlobalAdjustment(undoSnapshot.global);
+    setFrontSavedAdjustments(undoSnapshot.frontSaved);
+    setUndoSnapshot(null);
+  }, [undoSnapshot]);
 
   // 「正面に呼ぶ」: 選択中のコンテンツを、今見ている正面に、こちらを向けて置く（一時的な見やすさ用）。
   // 具体的な位置はCanvas内（カメラの向きが分かる場所）で求め、onBroughtで受け取って反映する。
@@ -433,15 +492,52 @@ export function ArViewView() {
     element.style.setProperty("--reticle-size", `${state.diameter}px`);
   }, []);
 
+  const hintKind = selectedId ? "selected" : "none";
+  const isHintVisible = isAdjustMode && !doneHints[hintKind] && !holdPhase && !undoSnapshot;
+  const dismissHint = useCallback(() => {
+    setDoneHints((prev) => (prev.none && prev.selected ? prev : { none: true, selected: true }));
+  }, []);
+  useEffect(() => {
+    if (!isHintVisible) return undefined;
+    const timer = setTimeout(
+      () => setDoneHints((prev) => ({ ...prev, [hintKind]: true })),
+      HINT_VISIBLE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [isHintVisible, hintKind]);
+
   const adjustSurfaceRef = useArViewAdjustGestures({
     enabled: isAdjustMode,
+    canPitch: !!selectedId,
     onTap: (x, y) => {
+      dismissHint();
       pickRequestRef.current = { x, y };
     },
-    onRotateByDelta: (deltaPixels) => rotateBy(deltaPixels * ADJUST_ROTATE_RADIANS_PER_PIXEL),
-    onMoveByDelta: (deltaX, deltaY) =>
-      moveBy(-deltaY * ADJUST_MOVE_METERS_PER_PIXEL, deltaX * ADJUST_MOVE_METERS_PER_PIXEL),
+    onDoubleTap: () => {
+      dismissHint();
+      toggleFront();
+    },
+    onRotateByDelta: (deltaPixels) => {
+      dismissHint();
+      rotateBy(deltaPixels * ADJUST_ROTATE_RADIANS_PER_PIXEL);
+    },
+    // 下へドラッグ=上端を手前に倒す
+    onPitchByDelta: (deltaPixels) => {
+      dismissHint();
+      pitchBy(deltaPixels * ADJUST_PITCH_RADIANS_PER_PIXEL);
+    },
+    // 上へドラッグ=上へ
+    onHeightByDelta: (deltaPixels) => {
+      dismissHint();
+      changeHeightBy(-deltaPixels * ADJUST_HEIGHT_METERS_PER_PIXEL);
+    },
+    onMoveByDelta: (deltaX, deltaY) => {
+      dismissHint();
+      moveBy(-deltaY * ADJUST_MOVE_METERS_PER_PIXEL, deltaX * ADJUST_MOVE_METERS_PER_PIXEL);
+    },
     onScaleBy: scaleBy,
+    onLongPressReset: resetAdjustments,
+    onHoldPhaseChange: setHoldPhase,
   });
 
   const selectedPlacement = placementsWithGeometry.find((p) => p.id === selectedId) ?? null;
@@ -475,22 +571,81 @@ export function ArViewView() {
           {/* 選択中のコンテンツへ追従するハイライト（位置・大きさはCanvas内の処理が毎フレーム更新する） */}
           {isAdjustMode && (
             <div ref={reticleRef} className={styles.selectionReticle} style={{ display: "none" }}>
-              <div className={styles.selectionReticleRing} />
+              <div
+                className={
+                  holdPhase === "armed"
+                    ? styles.selectionReticleRingArmed
+                    : holdPhase === "height"
+                      ? styles.selectionReticleRingHeight
+                      : styles.selectionReticleRing
+                }
+              />
               {selectedPlacement && (
                 <div className={styles.selectionReticleLabel}>{selectedPlacement.label || "(名前なし)"}</div>
               )}
             </div>
           )}
 
-          <button
-            type="button"
-            className={isAdjustMode ? styles.adjustToggleActive : styles.adjustToggle}
-            onClick={() => setIsAdjustMode((current) => !current)}
-          >
-            調整モード: {isAdjustMode ? "ON" : "OFF"}
-          </button>
+          {/* 長押し中のフィードバック（0.5秒で高さ調整の待機、そのまま押し続けるとリセット） */}
+          {isAdjustMode && holdPhase && (
+            <div className={styles.holdToast}>
+              {holdPhase === "height" ? (
+                <p>↕ 高さを調整中</p>
+              ) : (
+                <>
+                  <p>
+                    {selectedPlacement
+                      ? "上下にドラッグで高さを調整 ・ このまま押し続けるとリセット"
+                      : "このまま押し続けると全体をリセット"}
+                  </p>
+                  <div className={styles.holdProgress}>
+                    <div
+                      className={styles.holdProgressFill}
+                      style={{ animationDuration: `${HOLD_RESET_MS - HOLD_ARM_MS}ms` }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
-          {isAdjustMode && (
+          {isAdjustMode && undoSnapshot && (
+            <div className={styles.undoToast}>
+              <span>{undoSnapshot.label}</span>
+              <button type="button" onClick={undoReset}>
+                元に戻す
+              </button>
+            </div>
+          )}
+
+          {isHintVisible && (
+            <p className={styles.operationHint}>
+              {selectedPlacement
+                ? "1本指=回転(横・縦) ・ 2本指=移動/拡大縮小 ・ 長押し→上下=高さ ・ ダブルタップ=正面に呼ぶ ・ 長押し=リセット"
+                : "コンテンツをタップで選択 ・ スワイプ=全体を回転 ・ 2本指=全体を移動"}
+            </p>
+          )}
+
+          <div className={styles.adjustControls}>
+            {isAdjustMode && (
+              <button
+                type="button"
+                className={styles.adjustFineToggle}
+                onClick={() => setIsFineAdjustOpen((current) => !current)}
+              >
+                細かく調整 {isFineAdjustOpen ? "▲" : "▼"}
+              </button>
+            )}
+            <button
+              type="button"
+              className={isAdjustMode ? styles.adjustToggleActive : styles.adjustToggle}
+              onClick={() => setIsAdjustMode((current) => !current)}
+            >
+              調整モード: {isAdjustMode ? "ON" : "OFF"}
+            </button>
+          </div>
+
+          {isAdjustMode && isFineAdjustOpen && (
             <div className={styles.adjustPanel}>
               <p className={styles.adjustStatus}>
                 {selectedPlacement ? (
@@ -501,104 +656,95 @@ export function ArViewView() {
                   "全体を調整中（コンテンツをタップすると、その1件だけを調整）"
                 )}
               </p>
-              <p className={styles.adjustPanelHint}>
-                スワイプ=回転 ・ 2本指ドラッグ=移動 ・ ピンチ=拡大縮小
-                {selectedPlacement ? "（空をタップで選択解除）" : ""}
-                <br />
-                画面を開いている間だけの補正です（保存されません）
-              </p>
 
               <div className={styles.adjustButtons}>
                 {selectedPlacement && (
-                  <>
-                    <button type="button" onClick={toggleFront}>
-                      {isFrontShown ? "元の位置に戻す" : "正面に呼ぶ"}
-                    </button>
-                    <button type="button" onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}>
-                      高さ ▲
-                    </button>
-                    <button type="button" onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}>
-                      高さ ▼
-                    </button>
-                  </>
+                  <button type="button" onClick={toggleFront}>
+                    {isFrontShown ? "元の位置に戻す" : "正面に呼ぶ"}
+                  </button>
                 )}
                 <button type="button" onClick={resetAdjustments}>
                   {selectedPlacement ? "選択中をリセット" : "すべてリセット"}
                 </button>
-                <button type="button" onClick={() => setIsAdjustMode(false)}>
-                  完了
-                </button>
               </div>
 
-              <button
-                type="button"
-                className={styles.adjustFineToggle}
-                onClick={() => setIsFineAdjustOpen((current) => !current)}
-              >
-                細かく調整 {isFineAdjustOpen ? "▲" : "▼"}
-              </button>
-
-              {isFineAdjustOpen && (
-                <div className={styles.adjustGrid}>
-                  <span>回転</span>
-                  <div className={styles.adjustButtons}>
-                    <button type="button" onClick={() => rotateBy(-ADJUST_ROTATE_STEP_RADIANS)}>
-                      ◀
-                    </button>
-                    <button type="button" onClick={() => rotateBy(ADJUST_ROTATE_STEP_RADIANS)}>
-                      ▶
-                    </button>
-                  </div>
-
-                  <span>位置(前後)</span>
-                  <div className={styles.adjustButtons}>
-                    <button type="button" onClick={() => moveBy(-ADJUST_MOVE_STEP_METERS, 0)}>
-                      手前へ
-                    </button>
-                    <button type="button" onClick={() => moveBy(ADJUST_MOVE_STEP_METERS, 0)}>
-                      奥へ
-                    </button>
-                  </div>
-
-                  <span>位置(左右)</span>
-                  <div className={styles.adjustButtons}>
-                    <button type="button" onClick={() => moveBy(0, -ADJUST_MOVE_STEP_METERS)}>
-                      左へ
-                    </button>
-                    <button type="button" onClick={() => moveBy(0, ADJUST_MOVE_STEP_METERS)}>
-                      右へ
-                    </button>
-                  </div>
-
-                  <span>高さ</span>
-                  <div className={styles.adjustButtons}>
-                    <button
-                      type="button"
-                      disabled={!selectedId}
-                      onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}
-                    >
-                      －
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!selectedId}
-                      onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}
-                    >
-                      ＋
-                    </button>
-                  </div>
-
-                  <span>大きさ</span>
-                  <div className={styles.adjustButtons}>
-                    <button type="button" disabled={!selectedId} onClick={() => scaleBy(1 / ADJUST_SCALE_STEP_RATIO)}>
-                      －
-                    </button>
-                    <button type="button" disabled={!selectedId} onClick={() => scaleBy(ADJUST_SCALE_STEP_RATIO)}>
-                      ＋
-                    </button>
-                  </div>
+              <div className={styles.adjustGrid}>
+                <span>回転(横)</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" onClick={() => rotateBy(-ADJUST_ROTATE_STEP_RADIANS)}>
+                    ◀
+                  </button>
+                  <button type="button" onClick={() => rotateBy(ADJUST_ROTATE_STEP_RADIANS)}>
+                    ▶
+                  </button>
                 </div>
-              )}
+
+                <span>回転(縦)</span>
+                <div className={styles.adjustButtons}>
+                  <button
+                    type="button"
+                    disabled={!selectedId}
+                    onClick={() => pitchBy(-ADJUST_ROTATE_STEP_RADIANS)}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedId}
+                    onClick={() => pitchBy(ADJUST_ROTATE_STEP_RADIANS)}
+                  >
+                    ▼
+                  </button>
+                </div>
+
+                <span>位置(前後)</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" onClick={() => moveBy(-ADJUST_MOVE_STEP_METERS, 0)}>
+                    手前へ
+                  </button>
+                  <button type="button" onClick={() => moveBy(ADJUST_MOVE_STEP_METERS, 0)}>
+                    奥へ
+                  </button>
+                </div>
+
+                <span>位置(左右)</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" onClick={() => moveBy(0, -ADJUST_MOVE_STEP_METERS)}>
+                    左へ
+                  </button>
+                  <button type="button" onClick={() => moveBy(0, ADJUST_MOVE_STEP_METERS)}>
+                    右へ
+                  </button>
+                </div>
+
+                <span>高さ</span>
+                <div className={styles.adjustButtons}>
+                  <button
+                    type="button"
+                    disabled={!selectedId}
+                    onClick={() => changeHeightBy(-ADJUST_HEIGHT_STEP_METERS)}
+                  >
+                    －
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedId}
+                    onClick={() => changeHeightBy(ADJUST_HEIGHT_STEP_METERS)}
+                  >
+                    ＋
+                  </button>
+                </div>
+
+                <span>大きさ</span>
+                <div className={styles.adjustButtons}>
+                  <button type="button" disabled={!selectedId} onClick={() => scaleBy(1 / ADJUST_SCALE_STEP_RATIO)}>
+                    －
+                  </button>
+                  <button type="button" disabled={!selectedId} onClick={() => scaleBy(ADJUST_SCALE_STEP_RATIO)}>
+                    ＋
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
