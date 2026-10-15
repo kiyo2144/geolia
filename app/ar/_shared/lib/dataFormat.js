@@ -1,4 +1,4 @@
-// AR配置データ（点群・Gaussian Splat・静止画・GIF・VRM・HTML）のファイル形式判定・
+// AR配置データ（点群・Gaussian Splat・静止画・GIF・VRM・HTML・YouTube動画）のファイル形式判定・
 // サイズ上限まわりの共通ロジック。カメラ経由のAR設置(ar/new)と、
 // カメラを使わないデスクトップ設置(一人称視点)の両方から利用する。
 
@@ -74,5 +74,6 @@ export function getAssetType(dataFormat) {
   if (dataFormat === "image" || dataFormat === "gif") return "image";
   if (dataFormat === "vrm") return "vrm";
   if (dataFormat === "html") return "html";
+  if (dataFormat === "video") return "video";
   return "point_cloud";
 }

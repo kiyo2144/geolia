@@ -28,6 +28,11 @@ import {
   SPLAT_FILE_TYPE_BY_EXTENSION,
 } from "../_shared/lib/dataFormat";
 import { saveArPlacement } from "../_shared/lib/saveArPlacement";
+import {
+  getYoutubeThumbnailUrl,
+  getYoutubeWatchUrl,
+  parseYoutubeUrl,
+} from "../_shared/lib/youtube";
 import styles from "./ArNewView.module.css";
 
 // GPS高度の原因切り分け用に追加したデバッグ表示の一時的な表示切り替え。
@@ -86,7 +91,7 @@ const MAX_HEIGHT_ABOVE_GROUND_METERS = 30;
 
 // 静止画・GIFは平面（板状）で表示されるため、点群等に比べて同じ回転・上下移動量でも
 // 見た目の変化が乏しく操作しにくい。データ種別ごとに回転・上下移動の感度を補正する。
-const GESTURE_SENSITIVITY_MULTIPLIERS = { image: 2.5, gif: 2.5 };
+const GESTURE_SENSITIVITY_MULTIPLIERS = { image: 2.5, gif: 2.5, video: 2.5 };
 const getGestureSensitivityMultiplier = (dataFormat) =>
   GESTURE_SENSITIVITY_MULTIPLIERS[dataFormat] ?? 1;
 
@@ -110,6 +115,11 @@ export function ArNewView() {
   const [step, setStep] = useState("upload");
   const [dataFile, setDataFile] = useState(null);
   const [fileError, setFileError] = useState(null);
+  // YouTube動画で設置する場合のURL入力（ファイルの代わり。どちらか一方だけ使う）
+  const [youtubeUrlInput, setYoutubeUrlInput] = useState("");
+  // 埋め込み再生が許可されていない可能性がある場合の警告（YouTubeのoEmbedの応答で判定。判定できない場合は出さない）
+  const [youtubeWarning, setYoutubeWarning] = useState(null);
+  const fileInputRef = useRef(null);
   const [placement, setPlacement] = useState(null); // { lat, lng, altitude }
   // アンカー（配置）確定時点の自己位置のスナップショット。確定後はGPSの更新を
   // 反映せずこれを使い続けることで、GPSの揺れでアンカーが動いて見えるのを防ぐ
@@ -153,7 +163,12 @@ export function ArNewView() {
   // 画面遷移するまでの間の再タップで同じ配置が2件登録されてしまうため、refで即座に弾く。
   const isSaveLockedRef = useRef(false);
 
-  const dataFormat = useMemo(() => getDataFormat(dataFile), [dataFile]);
+  const videoId = useMemo(() => parseYoutubeUrl(youtubeUrlInput), [youtubeUrlInput]);
+  const isYoutubeUrlInvalid = youtubeUrlInput.trim() !== "" && !videoId;
+  const dataFormat = useMemo(
+    () => (videoId ? "video" : getDataFormat(dataFile)),
+    [videoId, dataFile],
+  );
   const splatFileType = useMemo(
     () => (dataFormat === "splat" ? SPLAT_FILE_TYPE_BY_EXTENSION[getFileFormat(dataFile)] : undefined),
     [dataFormat, dataFile],
@@ -197,6 +212,37 @@ export function ArNewView() {
     };
   }, [dataFormat, dataUrl]);
 
+  // YouTube動画: サムネイルを配置一覧用のプレビュー画像として取得し、名前が空なら動画のタイトルを入れる。
+  // どちらも補助的な情報のため、取得に失敗しても設置自体は続けられる（埋め込み不可の動画はoEmbedが401を返す）。
+  useEffect(() => {
+    if (!videoId) return undefined;
+
+    let cancelled = false;
+    fetch(getYoutubeThumbnailUrl(videoId))
+      .then((response) => (response.ok ? response.blob() : null))
+      .then((blob) => {
+        if (!cancelled && blob) setPreviewBlob(blob);
+      })
+      .catch(() => {});
+
+    fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(getYoutubeWatchUrl(videoId))}&format=json`)
+      .then(async (response) => {
+        if (cancelled) return;
+        if (response.status === 401) {
+          setYoutubeWarning("この動画は埋め込み再生が許可されていない可能性があります（再生できない場合があります）");
+          return;
+        }
+        if (!response.ok) return;
+        const info = await response.json();
+        if (!cancelled && info?.title) setLabel((current) => current || String(info.title).slice(0, 100));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [videoId]);
+
   // VRM用: アップロードされたモーションファイル(.vrma)の一時URL
   const motionFileUrl = useMemo(
     () => (motionFile ? URL.createObjectURL(motionFile) : null),
@@ -229,6 +275,11 @@ export function ArNewView() {
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] ?? null;
+    if (file) {
+      // ファイルを選んだらYouTubeのURL入力は取り消す（どちらか一方だけを設置する）
+      setYoutubeUrlInput("");
+      setYoutubeWarning(null);
+    }
     if (file) {
       const format = getDataFormat(file);
       if (!format) {
@@ -263,6 +314,22 @@ export function ArNewView() {
     setPreviewBlob(null);
     setIsSaved(false);
     isSaveLockedRef.current = false;
+  };
+
+  const handleYoutubeUrlChange = (event) => {
+    const value = event.target.value;
+    setYoutubeUrlInput(value);
+    setYoutubeWarning(null);
+    setPreviewBlob(null);
+    setIsSaved(false);
+    isSaveLockedRef.current = false;
+    if (value.trim()) {
+      // URLを入力したらファイルの選択は取り消す（どちらか一方だけを設置する）
+      setDataFile(null);
+      setFileError(null);
+      setColorInfo(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const handleMotionFileChange = (event) => {
@@ -479,7 +546,7 @@ export function ArNewView() {
   }, [effectiveAltitude, adjustment.y]);
 
   const handleSave = useCallback(async () => {
-    if (!dataFile || !placement) return;
+    if ((!dataFile && !videoId) || !placement) return;
     if (!label.trim()) {
       setLabelError(true);
       setSaveStatus("名前を入力してください");
@@ -494,6 +561,7 @@ export function ArNewView() {
       await saveArPlacement(supabase, {
         dataFile,
         dataFormat,
+        videoId,
         label,
         lat: placement.lat,
         lng: placement.lng,
@@ -526,6 +594,7 @@ export function ArNewView() {
   }, [
     dataFile,
     dataFormat,
+    videoId,
     placement,
     adjustment,
     label,
@@ -548,13 +617,14 @@ export function ArNewView() {
           <p>
             点群（.ply）、Gaussian Splat（.spz / .splat / .ksplat / .sog）、
             静止画・GIF（.jpg / .png / .webp / .gif）、VRoid Studioデータ（.vrm）、
-            HTML（.html）から選択してください。設置場所はこのあとカメラを見ながら決めます。
+            HTML（.html）から選択するか、YouTube動画のURLを入力してください。設置場所はこのあとカメラを見ながら決めます。
             ファイルを選択しない場合はデモ用の点群で動作確認できます。
           </p>
 
           <label className={styles.field}>
             データファイル (.ply / .spz / .splat / .ksplat / .sog / .jpg / .png / .webp / .gif / .vrm / .html)
             <input
+              ref={fileInputRef}
               type="file"
               // iOSの「ファイル」アプリは、.spz等の独自拡張子だけを指定すると
               // ファイルをグレーアウトして選択できないことがあるため、
@@ -567,6 +637,36 @@ export function ArNewView() {
 
           {fileError && <p className={styles.error}>{fileError}</p>}
           {dataFile && <p className={styles.hint}>選択中: {dataFile.name}</p>}
+
+          <label className={styles.field}>
+            または YouTube動画のURL
+            <input
+              type="url"
+              inputMode="url"
+              placeholder="https://www.youtube.com/watch?v=..."
+              value={youtubeUrlInput}
+              onChange={handleYoutubeUrlChange}
+            />
+          </label>
+          {isYoutubeUrlInvalid && (
+            <p className={styles.error}>
+              YouTubeの動画URLを入力してください（youtube.com/watch?v=… ・ youtu.be/… ・ youtube.com/shorts/…）
+            </p>
+          )}
+          {videoId && (
+            <div className={styles.field}>
+              <p className={styles.hint}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={getYoutubeThumbnailUrl(videoId)}
+                  alt="動画のサムネイル"
+                  className={styles.thumbnailSmall}
+                />
+                YouTube動画を設置します。AR閲覧画面で、動画を選んでボタンから再生・一時停止できます（再生はミュートで始まります）。
+              </p>
+              {youtubeWarning && <p className={styles.error}>{youtubeWarning}</p>}
+            </div>
+          )}
           {dataFormat === "html" && (
             <p className={styles.hint}>
               HTMLは単一ファイルのみ表示できます。外部の読み込みは、主要なCDN（cdnjs・jsDelivr・unpkg・esm.sh・threejs.org・Google Fonts）
@@ -682,7 +782,7 @@ export function ArNewView() {
           )}
 
           <div className={styles.actions}>
-            <button type="button" onClick={handleProceedToAr} disabled={!!fileError}>
+            <button type="button" onClick={handleProceedToAr} disabled={!!fileError || isYoutubeUrlInvalid}>
               ARの設置に進む
             </button>
           </div>
@@ -707,6 +807,7 @@ export function ArNewView() {
                 targetPosition={placement}
                 dataUrl={dataUrl}
                 dataFormat={dataFormat}
+                videoId={videoId}
                 splatFileType={splatFileType}
                 adjustment={adjustment}
                 arSubMode={arSubMode}
@@ -890,7 +991,7 @@ export function ArNewView() {
                 disabled={
                   isSaving ||
                   isSaved ||
-                  !dataFile ||
+                  (!dataFile && !videoId) ||
                   !placement ||
                   !label.trim() ||
                   (dataFormat === "vrm" && motionSourceMode === "upload" && !motionFile)

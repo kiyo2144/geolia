@@ -19,6 +19,7 @@ function formatDateTime(isoString) {
 
 function assetTypeLabel(assetType) {
   if (assetType === "html") return "HTML";
+  if (assetType === "video") return "YouTube動画";
   return assetType === "gaussian_splat" ? "Gaussian Splat" : "点群";
 }
 

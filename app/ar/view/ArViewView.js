@@ -65,6 +65,7 @@ const ADJUST_MAX_PITCH_RADIANS = Math.PI / 2; // 縦回転の上限（±90度）
 const ADJUST_HEIGHT_METERS_PER_PIXEL = 0.01; // 長押し→上下ドラッグ（高さ）
 const UNDO_RESET_VISIBLE_MS = 6000; // リセット直後に「元に戻す」を出しておく時間
 const HINT_VISIBLE_MS = 7000; // 操作ヒントを自動で消すまでの時間
+const VIDEO_SEEK_BACK_SECONDS = 10; // 動画の「巻き戻し」ボタン1回あたり
 const FRONT_HINT_VISIBLE_MS = 3500; // タップで選択した直後の「ダブルタップ」案内を自動で消すまでの時間
 const ADJUST_ROTATE_STEP_RADIANS = Math.PI / 12; // ボタン1回あたり15度
 const ADJUST_MOVE_STEP_METERS = 0.5; // ボタン1回あたり
@@ -325,6 +326,9 @@ export function ArViewView() {
   const [holdPhase, setHoldPhase] = useState(null);
   // 直前のリセット前の補正値。リセット直後だけ「元に戻す」で復元できる。
   const [undoSnapshot, setUndoSnapshot] = useState(null);
+  // YouTube動画の操作: 各動画（YoutubePlaneObject）が登録するコントローラと、その再生状態
+  const videoControllersRef = useRef(new Map());
+  const [videoStates, setVideoStates] = useState({});
   // 開始時の操作ヒント（未選択のとき）を表示し終えたか
   const [isStartHintDone, setIsStartHintDone] = useState(false);
   // コンテンツをタップして選択した直後の「ダブルタップで正面に移動」案内（0=非表示。タップのたびに増やして再表示する）
@@ -447,6 +451,18 @@ export function ArViewView() {
     }
   }, [selectedId]);
 
+  const handleVideoStateChange = useCallback((id, state) => {
+    setVideoStates((prev) => {
+      if (state === null) {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: state };
+    });
+  }, []);
+
   const undoReset = useCallback(() => {
     if (!undoSnapshot) return;
     setIndividualAdjustments(undoSnapshot.individual);
@@ -559,6 +575,11 @@ export function ArViewView() {
 
   const selectedPlacement = placementsWithGeometry.find((p) => p.id === selectedId) ?? null;
   const isFrontShown = !!selectedId && !!frontSavedAdjustments[selectedId];
+  const selectedVideoState =
+    selectedPlacement?.asset_type === "video"
+      ? (videoStates[selectedId] ?? { status: "idle", muted: true, error: null })
+      : null;
+  const controlVideo = (action) => videoControllersRef.current.get(selectedId)?.[action]?.();
   const isFrontHintVisible =
     isAdjustMode && frontHintNonce > 0 && !!selectedPlacement && !holdPhase && !undoSnapshot;
 
@@ -583,6 +604,8 @@ export function ArViewView() {
             onReticleUpdate={updateReticle}
             onPick={handlePick}
             onBrought={handleBrought}
+            videoControllersRef={videoControllersRef}
+            onVideoStateChange={handleVideoStateChange}
           />
 
           {isAdjustMode && <div ref={adjustSurfaceRef} className={styles.adjustSurface} />}
@@ -634,6 +657,46 @@ export function ArViewView() {
               <button type="button" onClick={undoReset}>
                 元に戻す
               </button>
+            </div>
+          )}
+
+          {/* 選択中のYouTube動画の操作ボタン（動画そのものは調整モードの操作と競合するためタップしない） */}
+          {isAdjustMode && selectedVideoState && (
+            <div className={styles.videoBar}>
+              {selectedVideoState.status === "error" && (
+                <p className={styles.videoBarMessage}>{selectedVideoState.error}</p>
+              )}
+              <div className={styles.videoBarButtons}>
+                <button
+                  type="button"
+                  disabled={selectedVideoState.status === "loading"}
+                  onClick={() => controlVideo("playPause")}
+                >
+                  {selectedVideoState.status === "loading"
+                    ? "読み込み中…"
+                    : selectedVideoState.status === "playing"
+                      ? "⏸ 一時停止"
+                      : "▶ 再生"}
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    selectedVideoState.status !== "playing" && selectedVideoState.status !== "paused"
+                  }
+                  onClick={() => controlVideo("toggleMute")}
+                >
+                  {selectedVideoState.muted ? "🔇 ミュート中" : "🔊 音あり"}
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    selectedVideoState.status !== "playing" && selectedVideoState.status !== "paused"
+                  }
+                  onClick={() => videoControllersRef.current.get(selectedId)?.seekBy(-VIDEO_SEEK_BACK_SECONDS)}
+                >
+                  ⟲ {VIDEO_SEEK_BACK_SECONDS}秒
+                </button>
+              </div>
             </div>
           )}
 

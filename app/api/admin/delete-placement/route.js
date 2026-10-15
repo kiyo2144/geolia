@@ -63,7 +63,9 @@ export async function POST(request) {
       await supabase.from("ar_motion_assets").delete().eq("id", placement.motion_asset_id);
     }
 
-    const storagePathsToRemove = [dataAsset?.storage_path, placement.preview_storage_path].filter(Boolean);
+    // YouTube動画の storage_path は動画IDの記録（"youtube:<ID>"）でStorageにファイルは無い
+    const dataStoragePath = dataAsset?.storage_path?.startsWith("youtube:") ? null : dataAsset?.storage_path;
+    const storagePathsToRemove = [dataStoragePath, placement.preview_storage_path].filter(Boolean);
     if (storagePathsToRemove.length > 0) {
       await supabase.storage.from("ar-assets").remove(storagePathsToRemove);
     }

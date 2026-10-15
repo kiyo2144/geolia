@@ -12,6 +12,7 @@ function assetTypeLabel(assetType) {
   if (assetType === "image") return "画像";
   if (assetType === "gif") return "GIF";
   if (assetType === "html") return "HTML";
+  if (assetType === "video") return "YouTube動画";
   return "点群";
 }
 

@@ -12,6 +12,8 @@ import { PointCloudObject } from "../_shared/components/PointCloudObject";
 import { SparkSetup } from "../_shared/components/SparkSetup";
 import { SplatObject } from "../_shared/components/SplatObject";
 import { VrmObject } from "../_shared/components/VrmObject";
+import { YoutubePlaneObject } from "../_shared/components/YoutubePlaneObject";
+import { parseYoutubeStoragePath } from "../_shared/lib/youtube";
 
 // React Three Fiber の <Canvas> は position/pointerEvents 等を自前のインラインstyleで
 // 持っているため、外部CSSクラスでは上書きできない。style props で直接渡す必要がある。
@@ -23,7 +25,14 @@ const CANVAS_OVERLAY_STYLE = {
 };
 
 /** 詳細表示: 実データ(点群/Gaussian Splat/静止画/GIF/VRM)を読み込んで表示する */
-export function DetailedPlacement({ placement, url, motionAssetUrl }) {
+export function DetailedPlacement({
+  placement,
+  url,
+  motionAssetUrl,
+  videoControllersRef = null,
+  onVideoStateChange = null,
+}) {
+  const videoId = placement.asset_type === "video" ? parseYoutubeStoragePath(placement.storage_path) : null;
   return (
     <group rotation={[placement.rotation_x ?? 0, placement.rotation_y ?? 0, 0]} scale={placement.scale ?? 1}>
       {placement.asset_type === "gaussian_splat" ? (
@@ -50,6 +59,15 @@ export function DetailedPlacement({ placement, url, motionAssetUrl }) {
         />
       ) : placement.asset_type === "html" ? (
         <HtmlPlaneObject url={url} />
+      ) : placement.asset_type === "video" ? (
+        videoId && (
+          <YoutubePlaneObject
+            videoId={videoId}
+            placementId={placement.id}
+            videoControllersRef={videoControllersRef}
+            onVideoStateChange={onVideoStateChange}
+          />
+        )
       ) : (
         <PointCloudObject url={url} />
       )}
@@ -315,6 +333,8 @@ export function ArViewScene({
   onReticleUpdate = null,
   onPick = null,
   onBrought = null,
+  videoControllersRef = null,
+  onVideoStateChange = null,
 }) {
   const hasSplat = placements.some(
     (p) => p.tier === "detail" && p.asset_type === "gaussian_splat",
@@ -396,6 +416,8 @@ export function ArViewScene({
                             ? getPublicUrl(placement.motion_storage_path, "ar-motion-assets")
                             : null
                         }
+                        videoControllersRef={videoControllersRef}
+                        onVideoStateChange={onVideoStateChange}
                       />
                     </Suspense>
                     {showDebugInfo && <DebugDistanceLabel distanceMeters={placement.distance_meters} />}

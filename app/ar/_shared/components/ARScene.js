@@ -13,6 +13,7 @@ import { PointCloudObject } from "./PointCloudObject";
 import { SparkSetup } from "./SparkSetup";
 import { SplatObject } from "./SplatObject";
 import { VrmObject } from "./VrmObject";
+import { YoutubePlaneObject } from "./YoutubePlaneObject";
 
 // 「狙い撃ち」配置モードで、3Dデータをカメラの正面何メートル先に表示するか
 const AIM_DISTANCE_METERS = 2.2;
@@ -190,6 +191,7 @@ export function ARScene({
   targetPosition,
   dataUrl,
   dataFormat,
+  videoId = null,
   splatFileType,
   adjustment,
   arSubMode,
@@ -231,7 +233,8 @@ export function ARScene({
         <VrmObject url={dataUrl} motionPresetKey={motionPresetKey} motionAssetUrl={motionAssetUrl} />
       )}
       {dataUrl && dataFormat === "html" && <HtmlPlaneObject url={dataUrl} />}
-      {!dataUrl && <DemoPointCloud />}
+      {dataFormat === "video" && videoId && <YoutubePlaneObject videoId={videoId} />}
+      {!dataUrl && dataFormat !== "video" && <DemoPointCloud />}
     </>
   );
 

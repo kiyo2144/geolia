@@ -1,10 +1,14 @@
 import { getAssetType, getFileFormat } from "./dataFormat";
+import { getYoutubeWatchUrl, youtubeStoragePath } from "./youtube";
 
 /**
  * AR配置データ（ファイル・プレビュー画像・任意でVRMモーション）をアップロードし、
  * ar_data_assets / ar_placements テーブルに登録する。
  * カメラ経由のAR設置(ar/new)と、カメラを使わないデスクトップ設置(一人称視点)の
  * 両方から共通で使う保存処理。
+ *
+ * dataFormat が "video"（YouTube動画）のときは、ファイルのアップロードは行わず、videoId だけを
+ * ar_data_assets.storage_path（"youtube:<動画ID>"）に保存する（dataFile は不要）。
  *
  * onStatus: 進捗メッセージを画面に表示するためのコールバック（省略可）
  */
@@ -13,6 +17,7 @@ export async function saveArPlacement(
   {
     dataFile,
     dataFormat,
+    videoId,
     label,
     lat,
     lng,
@@ -30,14 +35,17 @@ export async function saveArPlacement(
     onStatus,
   },
 ) {
-  const format = getFileFormat(dataFile);
-  const storagePath = `${crypto.randomUUID()}.${format}`;
+  const isVideo = dataFormat === "video";
+  const format = isVideo ? "youtube" : getFileFormat(dataFile);
+  const storagePath = isVideo ? youtubeStoragePath(videoId) : `${crypto.randomUUID()}.${format}`;
 
-  onStatus?.("アップロード中...");
-  const { error: uploadError } = await supabase.storage.from("ar-assets").upload(storagePath, dataFile, {
-    contentType: dataFile.type || "application/octet-stream",
-  });
-  if (uploadError) throw uploadError;
+  if (!isVideo) {
+    onStatus?.("アップロード中...");
+    const { error: uploadError } = await supabase.storage.from("ar-assets").upload(storagePath, dataFile, {
+      contentType: dataFile.type || "application/octet-stream",
+    });
+    if (uploadError) throw uploadError;
+  }
 
   // プレビュー画像は無くても配置の保存自体は継続する（あくまで補助的な情報のため）
   let previewStoragePath = null;
@@ -84,9 +92,9 @@ export async function saveArPlacement(
     .insert({
       asset_type: getAssetType(dataFormat),
       storage_path: storagePath,
-      original_filename: dataFile.name,
+      original_filename: isVideo ? getYoutubeWatchUrl(videoId) : dataFile.name,
       format,
-      file_size_bytes: dataFile.size,
+      file_size_bytes: isVideo ? null : dataFile.size,
     })
     .select()
     .single();
