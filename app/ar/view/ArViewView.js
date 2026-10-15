@@ -65,6 +65,7 @@ const ADJUST_MAX_PITCH_RADIANS = Math.PI / 2; // 縦回転の上限（±90度）
 const ADJUST_HEIGHT_METERS_PER_PIXEL = 0.01; // 長押し→上下ドラッグ（高さ）
 const UNDO_RESET_VISIBLE_MS = 6000; // リセット直後に「元に戻す」を出しておく時間
 const HINT_VISIBLE_MS = 7000; // 操作ヒントを自動で消すまでの時間
+const FRONT_HINT_VISIBLE_MS = 3500; // タップで選択した直後の「ダブルタップ」案内を自動で消すまでの時間
 const ADJUST_ROTATE_STEP_RADIANS = Math.PI / 12; // ボタン1回あたり15度
 const ADJUST_MOVE_STEP_METERS = 0.5; // ボタン1回あたり
 const ADJUST_HEIGHT_STEP_METERS = 0.2; // ボタン1回あたり
@@ -324,8 +325,10 @@ export function ArViewView() {
   const [holdPhase, setHoldPhase] = useState(null);
   // 直前のリセット前の補正値。リセット直後だけ「元に戻す」で復元できる。
   const [undoSnapshot, setUndoSnapshot] = useState(null);
-  // 操作ヒントを表示し終えたか（未選択用・選択中用でそれぞれ1回ずつ）
-  const [doneHints, setDoneHints] = useState({ none: false, selected: false });
+  // 開始時の操作ヒント（未選択のとき）を表示し終えたか
+  const [isStartHintDone, setIsStartHintDone] = useState(false);
+  // コンテンツをタップして選択した直後の「ダブルタップで正面に移動」案内（0=非表示。タップのたびに増やして再表示する）
+  const [frontHintNonce, setFrontHintNonce] = useState(0);
   useEffect(() => {
     deviceHeadingRef.current = deviceHeading;
   }, [deviceHeading]);
@@ -492,19 +495,30 @@ export function ArViewView() {
     element.style.setProperty("--reticle-size", `${state.diameter}px`);
   }, []);
 
-  const hintKind = selectedId ? "selected" : "none";
-  const isHintVisible = isAdjustMode && !doneHints[hintKind] && !holdPhase && !undoSnapshot;
+  const isHintVisible =
+    isAdjustMode && !selectedId && !isStartHintDone && !holdPhase && !undoSnapshot;
+  // 何か操作したら、開始時のヒントも選択直後の案内も消す
   const dismissHint = useCallback(() => {
-    setDoneHints((prev) => (prev.none && prev.selected ? prev : { none: true, selected: true }));
+    setIsStartHintDone(true);
+    setFrontHintNonce(0);
   }, []);
   useEffect(() => {
     if (!isHintVisible) return undefined;
-    const timer = setTimeout(
-      () => setDoneHints((prev) => ({ ...prev, [hintKind]: true })),
-      HINT_VISIBLE_MS,
-    );
+    const timer = setTimeout(() => setIsStartHintDone(true), HINT_VISIBLE_MS);
     return () => clearTimeout(timer);
-  }, [isHintVisible, hintKind]);
+  }, [isHintVisible]);
+
+  // タップの結果（選択したコンテンツのID、何も無ければnull）はCanvas内の処理から返ってくる。
+  // コンテンツを選択できたときは、ダブルタップの案内を一定時間表示する。
+  const handlePick = useCallback((id) => {
+    setSelectedId(id);
+    if (id) setFrontHintNonce((current) => current + 1);
+  }, []);
+  useEffect(() => {
+    if (!frontHintNonce) return undefined;
+    const timer = setTimeout(() => setFrontHintNonce(0), FRONT_HINT_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [frontHintNonce]);
 
   const adjustSurfaceRef = useArViewAdjustGestures({
     enabled: isAdjustMode,
@@ -535,13 +549,18 @@ export function ArViewView() {
       dismissHint();
       moveBy(-deltaY * ADJUST_MOVE_METERS_PER_PIXEL, deltaX * ADJUST_MOVE_METERS_PER_PIXEL);
     },
-    onScaleBy: scaleBy,
+    onScaleBy: (ratio) => {
+      dismissHint();
+      scaleBy(ratio);
+    },
     onLongPressReset: resetAdjustments,
     onHoldPhaseChange: setHoldPhase,
   });
 
   const selectedPlacement = placementsWithGeometry.find((p) => p.id === selectedId) ?? null;
   const isFrontShown = !!selectedId && !!frontSavedAdjustments[selectedId];
+  const isFrontHintVisible =
+    isAdjustMode && frontHintNonce > 0 && !!selectedPlacement && !holdPhase && !undoSnapshot;
 
   return (
     <div className={styles.wrapper}>
@@ -562,7 +581,7 @@ export function ArViewView() {
             pickRequestRef={pickRequestRef}
             bringRequestRef={bringRequestRef}
             onReticleUpdate={updateReticle}
-            onPick={setSelectedId}
+            onPick={handlePick}
             onBrought={handleBrought}
           />
 
@@ -618,11 +637,15 @@ export function ArViewView() {
             </div>
           )}
 
+          {isFrontHintVisible && (
+            <p className={styles.frontHint}>
+              {isFrontShown ? "ダブルタップで元の位置に戻す" : "ダブルタップでARを正面に移動"}
+            </p>
+          )}
+
           {isHintVisible && (
             <p className={styles.operationHint}>
-              {selectedPlacement
-                ? "1本指=回転(横・縦) ・ 2本指=移動/拡大縮小 ・ 長押し→上下=高さ ・ ダブルタップ=正面に呼ぶ ・ 長押し=リセット"
-                : "コンテンツをタップで選択 ・ スワイプ=全体を回転 ・ 2本指=全体を移動"}
+              コンテンツをタップで選択 ・ スワイプ=全体を回転 ・ 2本指=全体を移動
             </p>
           )}
 
