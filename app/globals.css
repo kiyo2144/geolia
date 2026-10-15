@@ -44,6 +44,20 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.2s ease, color 0.2s ease;
+  /* ダブルタップでの画面拡大を無効にする（ピンチ拡大はlayout.jsのviewportと
+     PreventPageZoomで止めている）。スクロール・タップ等の操作は通常どおり */
+  touch-action: manipulation;
+}
+
+/* iOS Safariは、文字サイズが16px未満の入力欄にフォーカスすると画面を自動で拡大し、
+   拡大したまま戻らないため、画面外にボタン等が出て操作できなくなる。
+   タッチ端末では入力欄の文字サイズを16px以上にして、自動拡大を防ぐ。 */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
 }
 
 h1, h2, h3 {

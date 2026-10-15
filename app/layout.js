@@ -1,4 +1,5 @@
 import { Geist, Geist_Mono } from "next/font/google";
+import { PreventPageZoom } from "./components/PreventPageZoom";
 import { SiteHeader } from "./components/SiteHeader";
 import "./globals.css";
 
@@ -22,6 +23,15 @@ export const metadata = {
     "AR3Dデータを現実の位置に設置し、3Dマップ上で可視化・共有するプラットフォーム",
 };
 
+// ページ全体の拡大を禁止する。AR画面（カメラ全面表示）では、入力欄へのフォーカスや
+// 意図しないピンチで画面が拡大されると、操作ボタンが画面外に出て使えなくなるため。
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default function RootLayout({ children }) {
   return (
     <html lang="ja" className={`${geistSans.variable} ${geistMono.variable}`}>
@@ -31,6 +41,7 @@ export default function RootLayout({ children }) {
         <link rel="stylesheet" href={DESIGN_FONTS_HREF} />
       </head>
       <body>
+        <PreventPageZoom />
         <SiteHeader />
         {children}
       </body>

@@ -50,6 +50,7 @@
 }
 
 .field input[type="text"],
+.field input[type="url"],
 .field select {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
@@ -102,6 +103,8 @@
   position: relative;
   flex: 1;
   overflow: hidden;
+  /* カメラ全面表示中は、ページのスクロール・拡大は不要（操作はJS側で処理している） */
+  touch-action: none;
 }
 
 .backButton {
